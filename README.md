@@ -2,7 +2,7 @@
 
 Deze Streamlit-app leest CEV/WEVZA-achtige PDF-bulletins uit, laat de herkende spelers controleren en maakt een Excelrapport plus een deelbaar A4-PDF-overzicht. De app gebruikt geen AI of externe analyse-API.
 
-De app bewaart toernooien en spelers uitsluitend in het geheugen van de huidige browsersessie. Iedere bezoeker krijgt een eigen, afgescheiden sessie. Na het beëindigen of handmatig wissen van de sessie zijn de gegevens weg. Bij online gebruik wordt het bulletin wel op de Streamlit-server verwerkt; het wordt niet permanent door de app opgeslagen.
+De app bewaart toernooien en spelers uitsluitend in het geheugen van de huidige browsersessie. Iedere bezoeker krijgt een eigen, afgescheiden sessie. Na het beëindigen of handmatig wissen van de sessie zijn de gegevens weg. Bij online gebruik wordt het bulletin wel op de Streamlit-server verwerkt; het wordt niet permanent door de app opgeslagen. Tekst-PDF's worden rechtstreeks gelezen. Afbeeldings- en scanpagina's worden zo nodig lokaal op de Streamlit-server met Tesseract OCR verwerkt.
 
 ## Eenmalige installatie (Windows)
 
@@ -38,12 +38,12 @@ Download de gewenste rapporten voordat u de browser sluit. De app heeft bewust g
 
 ## Ondersteund in versie 0.1
 
-- Tekstgebaseerde CEV/WEVZA-bulletins met `FINAL TEAM LIST AND DELEGATION`.
+- Tekstgebaseerde en afbeeldingsgebaseerde CEV/WEVZA-rosters met herkenbare kolommen voor speler, positie, geboortedatum en lengte.
 - Detectie van datumvolgorde op documentniveau, met verplichte keuze bij twijfel.
 - Positienormalisatie, validatie, tijdelijke sessieverwerking, ranking, correlaties, Excel-export en A4-PDF-export.
 - Een later uitbreidbaar `match`-datamodel; wedstrijdanalyse is nog niet aanwezig.
 
-Niet ondersteund: OCR voor gescande PDF's en algemene automatische herkenning van iedere willekeurige bondslay-out.
+Niet iedere willekeurige bondslay-out kan foutloos worden herkend. De app toont een duidelijke melding wanneer geen betrouwbare spelersregels worden gevonden; gegevens worden dan niet geïmporteerd.
 
 ## Privacy bij ontwikkeling
 

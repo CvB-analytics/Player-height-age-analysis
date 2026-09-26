@@ -17,6 +17,25 @@ TEAM OFFICIAL
     assert result.players[1].position_normalized == "SV"
 
 
+def test_recognizes_roster_from_columns_without_exact_legacy_heading():
+    page = """
+INTERNATIONAL U18 EVENT
+TESTLAND (TST)
+TEAM ROSTER
+Name & First Name Position Birth Date Weight Height
+1 ALPHA Anna Setter 13/03/09 65 180
+2 BETA Bea Middle blocker 04/07/09 70 188
+3 GAMMA Gina Libero 1 11/11/09 58 170
+TEAM OFFICIALS:
+"""
+    parser = CEVRosterParser()
+
+    assert parser.supports([page])
+    result = parser.parse([page])
+    assert result.date_order == "DMY"
+    assert len(result.players) == 3
+
+
 def test_synthetic_bulletin_integration(synthetic_bulletin):
     result = parse_bulletin(str(synthetic_bulletin))
     assert len(result.teams) == 6

@@ -40,21 +40,37 @@ def render_import(db: Database) -> None:
         st.session_state["import_filename"] = uploaded.name
         st.session_state["import_result"] = result.as_records()
         st.session_state["import_date_order"] = result.date_order
+        st.session_state["import_profile"] = result.profile
         st.session_state["parser_warnings"] = result.warnings
+
+    rows = st.session_state.get("import_result")
+    if rows == []:
+        for warning in st.session_state.get("parser_warnings", []):
+            st.warning(warning)
+        st.error(
+            "Deze PDF leverde nog geen herkenbare spelersregels op. "
+            "De datumkeuze is daarom niet van toepassing."
+        )
+        return
+    if rows is None:
+        return
 
     order = st.session_state.get("import_date_order")
     if order == "AMBIGUOUS":
         st.warning("De datumvolgorde is niet betrouwbaar vast te stellen. Kies de indeling die voor de hele import geldt.")
-        choice = st.radio("Datumindeling", ["DD/MM", "MM/DD"], horizontal=True)
+        choice = st.radio("Datumindeling", ["DD/MM", "MM/DD"], horizontal=True, key="import_date_choice")
         if st.button("Datums opnieuw interpreteren"):
-            result = parse_bulletin(st.session_state["import_pdf_bytes"], "DMY" if choice == "DD/MM" else "MDY")
+            pdf_bytes = st.session_state.get("import_pdf_bytes")
+            if not pdf_bytes:
+                st.error("De tijdelijke PDF is niet meer beschikbaar. Selecteer het bestand opnieuw.")
+                return
+            result = parse_bulletin(pdf_bytes, "DMY" if choice == "DD/MM" else "MDY")
             st.session_state["import_result"] = result.as_records()
             st.session_state["import_date_order"] = result.date_order
+            st.session_state["import_profile"] = result.profile
+            st.session_state["parser_warnings"] = result.warnings
             st.rerun()
 
-    rows = st.session_state.get("import_result")
-    if not rows:
-        return
     for warning in st.session_state.get("parser_warnings", []):
         st.warning(warning)
     frame = pd.DataFrame(rows)
@@ -94,7 +110,7 @@ def render_import(db: Database) -> None:
             return
         db.save_players(tournament_id, saved_rows)
         db.update_tournament_source(tournament_id, st.session_state.get("import_filename", ""))
-        for key in ("import_result", "import_pdf_bytes", "import_filename", "import_date_order", "parser_warnings"):
+        for key in ("import_result", "import_pdf_bytes", "import_filename", "import_date_order", "import_profile", "import_date_choice", "parser_warnings"):
             st.session_state.pop(key, None)
         st.success("De import is goedgekeurd en tijdelijk in deze sessie beschikbaar.")
         st.rerun()

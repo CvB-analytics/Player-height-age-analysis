@@ -67,8 +67,19 @@ class CEVRosterParser(BaseRosterParser):
     name = "CEV/WEVZA"
 
     def supports(self, pages: list[str]) -> bool:
-        joined = "\n".join(pages).upper()
-        return "FINAL TEAM LIST AND DELEGATION" in joined and "BIRTH DATE" in joined
+        return any(self._is_roster_page(page) for page in pages)
+
+    @staticmethod
+    def _is_roster_page(page: str) -> bool:
+        upper = page.upper()
+        if "FINAL TEAM LIST" in upper and ("BIRTH" in upper or "PERSONAL DATA" in upper):
+            return True
+        return bool(
+            TEAM_RE.search(page)
+            and "POSITION" in upper
+            and "BIRTH" in upper
+            and len(DATE_IN_LINE.findall(page)) >= 3
+        )
 
     @staticmethod
     def _player_lines(text: str) -> list[str]:
@@ -143,7 +154,7 @@ class CEVRosterParser(BaseRosterParser):
         warnings: list[str] = []
 
         for page in pages:
-            if "FINAL TEAM LIST AND DELEGATION" not in page.upper():
+            if not self._is_roster_page(page):
                 continue
             team_match = TEAM_RE.search(page)
             if not team_match:
@@ -153,7 +164,8 @@ class CEVRosterParser(BaseRosterParser):
             country_code = team_match.group(2)
             teams.append({"country_code": country_code, "country_name": country_name})
 
-            roster = page[page.upper().find("FINAL TEAM LIST AND DELEGATION") :]
+            header_position = page.upper().find("FINAL TEAM LIST")
+            roster = page[header_position:] if header_position >= 0 else page
             for line in self._player_lines(roster):
                 match = PLAYER_RE.match(line)
                 if not match:
@@ -236,7 +248,10 @@ class GenericRosterParser(BaseRosterParser):
             "AMBIGUOUS",
             [],
             [],
-            ["Deze tabelindeling wordt nog niet automatisch ondersteund. Voeg de gegevens niet toe zonder controle."],
+            [
+                "Er is geen herkenbare spelerslijst gevonden. Mogelijk wijkt de tabelindeling af "
+                "of kon een afbeeldingspagina niet met OCR worden gelezen."
+            ],
         )
 
 
