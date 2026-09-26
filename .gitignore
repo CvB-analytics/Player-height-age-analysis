@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+wevza-volleybal-offline/
+*.pyc
+data/*.db
+data/*.log
+!data/.gitkeep
+samples/*.pdf
+samples/*.xlsx
+!samples/README.md
