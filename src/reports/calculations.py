@@ -67,6 +67,9 @@ def build_report_data(tournament: dict[str, Any], teams: list[dict[str, Any]], p
             )
 
     ranking_map = {team["country_code"]: team.get("final_ranking") for team in teams}
+    for row in country_rows:
+        row["ranking"] = ranking_map.get(row["country_code"])
+    country_rows.sort(key=lambda row: _ranking_sort_key(row["country_code"], ranking_map))
     result_rows: list[dict[str, Any]] = []
     for row in country_rows:
         result_rows.append(
@@ -107,6 +110,12 @@ def build_report_data(tournament: dict[str, Any], teams: list[dict[str, Any]], p
         "results": result_rows,
         "correlations": {"ranking_height": corr_height, "ranking_age": corr_age},
     }
+
+
+def _ranking_sort_key(country_code: str, ranking_map: dict[str, Any]) -> tuple[bool, float, str]:
+    """Sort ranked teams from 1 through x and keep unranked teams last."""
+    ranking = ranking_map.get(country_code)
+    return (ranking is None, float(ranking) if ranking is not None else float("inf"), country_code)
 
 
 def _mean(series: pd.Series) -> float | None:

@@ -33,6 +33,10 @@ def test_pdf_database_report_roundtrip(tmp_path, synthetic_bulletin):
     workbook = load_workbook(BytesIO(create_excel_report(report)))
     assert workbook.sheetnames == ["Overzicht", "Spelers", "Resultaten"]
     assert workbook["Spelers"].max_row == 83
+    overview_rankings = [workbook["Overzicht"].cell(row, 2).value for row in range(11, 17)]
+    result_rankings = [workbook["Resultaten"].cell(row, 2).value for row in range(4, 10)]
+    assert overview_rankings == [1, 2, 3, 4, 5, 6]
+    assert result_rankings == [1, 2, 3, 4, 5, 6]
     charts = workbook["Overzicht"]._charts
     assert len(charts) == 2
     assert all(chart.legend is None for chart in charts)

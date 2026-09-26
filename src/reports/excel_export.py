@@ -176,9 +176,16 @@ def _color_points(chart: BarChart, count: int) -> None:
 
 
 def _players(ws, report: dict[str, Any]) -> None:
-    frame = report["players_frame"]
+    frame = report["players_frame"].copy()
     headers = ["Land", "SpelerID", "Rugnr", "Achternaam", "Voornaam", "Positie", "Geb datum", "Lengte", "Leeftijd bij deelname", "Geboortejaar", "Startdatum", "Kwartaal", "Eindresultaat"]
     ranking = {team["country_code"]: team.get("final_ranking") for team in report["teams"]}
+    if not frame.empty:
+        frame["_output_ranking"] = frame["country_code"].map(ranking)
+        frame = frame.sort_values(
+            by=["_output_ranking", "country_code", "jersey_number", "id"],
+            na_position="last",
+            kind="stable",
+        )
     rows = []
     for _, row in frame.iterrows():
         birth = row["birth_date"].date() if row["birth_date"] == row["birth_date"] else None

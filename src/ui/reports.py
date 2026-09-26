@@ -33,9 +33,9 @@ def render_reports(db: Database) -> None:
     c4.metric("Gem. lengte", f"{summary['avg_height']:.1f} cm" if summary["avg_height"] is not None else "n.a.")
     st.subheader("Vergelijking landen")
     country_frame = pd.DataFrame(report["countries"]).rename(columns={
-        "country_code": "Land", "players": "# spelers", "avg_age": "Gem. leeftijd", "avg_net_height": "Gem. lengte netspelers"
+        "ranking": "Ranking", "country_code": "Land", "players": "# spelers", "avg_age": "Gem. leeftijd", "avg_net_height": "Gem. lengte netspelers"
     })
-    st.dataframe(country_frame[["Land", "# spelers", "Gem. leeftijd", "Gem. lengte netspelers", "Q1", "Q2", "Q3", "Q4"]], hide_index=True, use_container_width=True)
+    st.dataframe(country_frame[["Ranking", "Land", "# spelers", "Gem. leeftijd", "Gem. lengte netspelers", "Q1", "Q2", "Q3", "Q4"]], hide_index=True, use_container_width=True)
     chart_left, chart_right = st.columns(2)
     palette = ["#277DA1", "#F94144", "#90BE6D", "#8E6BBE", "#F8961E", "#43AA8B"]
     # Altair treats dots in field names as nested-property notation. Use a short

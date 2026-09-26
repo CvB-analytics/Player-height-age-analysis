@@ -26,3 +26,23 @@ def test_net_height_excludes_libero_and_pearson():
     assert report["countries"][0]["avg_net_height"] == 190.0
     assert round(report["correlations"]["ranking_height"], 6) == -1.0
     assert round(pearson([1, 2, 3], [3, 2, 1]), 6) == -1.0
+
+
+def test_report_output_is_sorted_by_ranking_with_unranked_teams_last():
+    tournament = {"name": "Test", "category": "U20", "gender": "Women", "location": "X", "start_date": "2026-08-25"}
+    teams = [
+        {"id": 1, "country_code": "AAA", "country_name": "A", "final_ranking": 3},
+        {"id": 2, "country_code": "BBB", "country_name": "B", "final_ranking": 1},
+        {"id": 3, "country_code": "CCC", "country_name": "C", "final_ranking": None},
+        {"id": 4, "country_code": "DDD", "country_name": "D", "final_ranking": 2},
+    ]
+    players = [
+        {"id": index, "country_code": code, "country_name": code, "position_normalized": "MB", "birth_date": "2008-01-01", "height_cm": 180 + index, "last_name": code, "first_name": code, "jersey_number": 1}
+        for index, code in enumerate(("AAA", "BBB", "CCC", "DDD"), 1)
+    ]
+
+    report = build_report_data(tournament, teams, players)
+
+    assert [row["country_code"] for row in report["countries"]] == ["BBB", "DDD", "AAA", "CCC"]
+    assert [row["ranking"] for row in report["countries"]] == [1, 2, 3, None]
+    assert [row["ranking"] for row in report["results"]] == [1, 2, 3, None]
