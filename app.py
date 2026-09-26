@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import streamlit as st
 
@@ -11,11 +10,7 @@ from src.ui.reports import render_reports
 from src.ui.results import render_results
 from src.ui.tournament import render_new_tournament, render_tournaments
 
-ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT / "data"
-DATA_DIR.mkdir(exist_ok=True)
 logging.basicConfig(
-    filename=DATA_DIR / "app.log",
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
@@ -33,10 +28,27 @@ st.markdown(
 )
 
 
+def _session_database() -> Database:
+    if "database" not in st.session_state:
+        st.session_state["database"] = Database()
+    return st.session_state["database"]
+
+
+def _clear_session() -> None:
+    database = st.session_state.get("database")
+    if database is not None:
+        database.close()
+    st.session_state.clear()
+    st.rerun()
+
+
 def main() -> None:
-    db = Database(DATA_DIR / "app.db")
+    db = _session_database()
     st.title("Volleybaltoernooi verwerken")
-    st.caption("Alles blijft lokaal op deze computer. De app gebruikt geen AI, cloudservice of externe API.")
+    st.caption(
+        "Gegevens blijven alleen in deze browsersessie en worden niet permanent opgeslagen. "
+        "De app gebruikt geen AI of externe analyse-API."
+    )
     pages = {
         "Toernooien": render_tournaments,
         "Nieuw toernooi": render_new_tournament,
@@ -49,11 +61,16 @@ def main() -> None:
     tournament = db.get_tournament(tournament_id) if tournament_id else None
     st.sidebar.divider()
     st.sidebar.caption(f"Actief: {tournament['name']}" if tournament else "Geen actief toernooi")
+    with st.sidebar.expander("Sessiedata wissen"):
+        st.caption("Verwijdert direct alle toernooien en spelers uit deze browsersessie.")
+        confirm_clear = st.checkbox("Ik wil alle sessiegegevens wissen.", key="confirm_clear_session")
+        if st.button("Alles wissen", disabled=not confirm_clear, use_container_width=True):
+            _clear_session()
     try:
         pages[selected](db)
     except Exception as exc:
         logging.exception("Onverwachte fout in scherm %s", selected)
-        st.error("Er ging iets mis. De gegevens zijn niet stilletjes opgeslagen. Sluit de app niet; probeer de vorige stap opnieuw.")
+        st.error("Er ging iets mis. Probeer de vorige stap opnieuw; gegevens worden niet permanent opgeslagen.")
         with st.expander("Technische informatie voor ondersteuning"):
             st.code(str(exc))
 

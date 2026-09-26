@@ -31,7 +31,7 @@ def render_import(db: Database) -> None:
     uploaded = st.file_uploader("PDF selecteren", type=["pdf"], accept_multiple_files=False)
     if uploaded and st.button("PDF verwerken", type="primary"):
         try:
-            with st.spinner("Het bulletin wordt lokaal uitgelezen..."):
+            with st.spinner("Het bulletin wordt in deze sessie uitgelezen..."):
                 result = parse_bulletin(uploaded.getvalue())
         except NoUsableTextError as exc:
             st.error(str(exc))
@@ -78,7 +78,7 @@ def render_import(db: Database) -> None:
         num_rows="dynamic",
         key="import_editor",
     )
-    if st.button("Import goedkeuren en opslaan", type="primary"):
+    if st.button("Import goedkeuren en gebruiken", type="primary"):
         internal = edited.rename(columns={value: key for key, value in DISPLAY_COLUMNS.items()})
         saved_rows = internal.to_dict("records")
         by_key = {_row_key(r): r for r in rows if _row_key(r) is not None}
@@ -90,13 +90,13 @@ def render_import(db: Database) -> None:
         saved_rows = validate_import(saved_rows, start)
         remaining = sum(row["extraction_status"] != "OK" for row in saved_rows)
         if remaining:
-            st.error(f"Er zijn nog {remaining} regels met waarschuwingen. Corrigeer deze eerst; de import is niet opgeslagen.")
+            st.error(f"Er zijn nog {remaining} regels met waarschuwingen. Corrigeer deze eerst; de import is niet verwerkt.")
             return
         db.save_players(tournament_id, saved_rows)
         db.update_tournament_source(tournament_id, st.session_state.get("import_filename", ""))
         for key in ("import_result", "import_pdf_bytes", "import_filename", "import_date_order", "parser_warnings"):
             st.session_state.pop(key, None)
-        st.success("De import is goedgekeurd en lokaal opgeslagen.")
+        st.success("De import is goedgekeurd en tijdelijk in deze sessie beschikbaar.")
         st.rerun()
 
 

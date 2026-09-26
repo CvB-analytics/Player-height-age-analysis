@@ -38,7 +38,7 @@ def render_results(db: Database) -> None:
         else:
             rankings = {int(row["team_id"]): (int(row["Eindranking"]) if pd.notna(row["Eindranking"]) else None) for _, row in edited.iterrows()}
             db.save_ranking(tournament_id, rankings)
-            st.success("De ranking is opgeslagen.")
+            st.success("De ranking is in deze sessie bijgewerkt.")
             st.rerun()
 
     report = build_report_data(tournament, teams, players)

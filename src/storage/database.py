@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
+from threading import RLock
 from typing import Any, Iterator
 
 SCHEMA = """
@@ -57,24 +58,52 @@ CREATE INDEX IF NOT EXISTS idx_team_tournament ON team(tournament_id);
 
 
 class Database:
-    def __init__(self, path: str | Path = "data/app.db") -> None:
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, path: str | Path | None = None) -> None:
+        self._lock = RLock()
+        self._memory_connection: sqlite3.Connection | None = None
+        self._closed = False
+        self.path: Path | None = None
+        if path is None or str(path) == ":memory:":
+            self._memory_connection = self._open_connection(":memory:", check_same_thread=False)
+        else:
+            self.path = Path(path)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         self.initialize()
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path)
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("De tijdelijke database is al afgesloten.")
+            persistent = self.path is None
+            connection = self._memory_connection if persistent else self._open_connection(self.path)
+            if connection is None:
+                raise RuntimeError("De tijdelijke database is al afgesloten.")
+            try:
+                yield connection
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                if not persistent:
+                    connection.close()
+
+    @staticmethod
+    def _open_connection(path: str | Path | None, *, check_same_thread: bool = True) -> sqlite3.Connection:
+        if path is None:
+            raise ValueError("Een databasepad ontbreekt.")
+        connection = sqlite3.connect(path, check_same_thread=check_same_thread)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        try:
-            yield connection
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        return connection
+
+    def close(self) -> None:
+        with self._lock:
+            if self._memory_connection is not None:
+                self._memory_connection.close()
+                self._memory_connection = None
+            self._closed = True
 
     def initialize(self) -> None:
         with self.connect() as connection:

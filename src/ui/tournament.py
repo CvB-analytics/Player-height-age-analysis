@@ -38,7 +38,7 @@ def render_tournaments(db: Database) -> None:
             rows = validate_import(edited.to_dict("records"), start)
             for row in rows:
                 db.update_player(int(row["id"]), row)
-            st.success("De correcties zijn lokaal opgeslagen.")
+            st.success("De correcties zijn in deze sessie bijgewerkt.")
             st.rerun()
 
     with st.expander("Toernooi verwijderen"):

@@ -1,6 +1,8 @@
-# Lokale volleybaltoernooi-app
+# Volleybaltoernooi-analyse
 
-Deze Streamlit-app leest CEV/WEVZA-achtige PDF-bulletins lokaal uit, laat de herkende spelers controleren en maakt een Excelrapport plus een deelbaar A4-PDF-overzicht. De app verstuurt niets naar internet en gebruikt geen AI of API-key.
+Deze Streamlit-app leest CEV/WEVZA-achtige PDF-bulletins uit, laat de herkende spelers controleren en maakt een Excelrapport plus een deelbaar A4-PDF-overzicht. De app gebruikt geen AI of externe analyse-API.
+
+De app bewaart toernooien en spelers uitsluitend in het geheugen van de huidige browsersessie. Iedere bezoeker krijgt een eigen, afgescheiden sessie. Na het beëindigen of handmatig wissen van de sessie zijn de gegevens weg. Bij online gebruik wordt het bulletin wel op de Streamlit-server verwerkt; het wordt niet permanent door de app opgeslagen.
 
 ## Eenmalige installatie (Windows)
 
@@ -22,7 +24,7 @@ Voor deze eenmalige installatie zijn de Python-pakketten uit `requirements.txt` 
 1. Kies **Nieuw toernooi** en vul minimaal naam, categorie, locatie en startdatum in.
 2. Kies **Import controleren**, selecteer het PDF-bulletin en klik **PDF verwerken**.
 3. Controleer alle waarschuwingen en corrigeer de tabel. Datums gebruikt u als `JJJJ-MM-DD`.
-4. Klik **Import goedkeuren en opslaan**. De app weigert opslag zolang er nog bekende waarschuwingen zijn.
+4. Klik **Import goedkeuren en gebruiken**. De app verwerkt de import pas wanneer er geen bekende waarschuwingen meer zijn.
 5. Vul later onder **Resultaten** de eindranking in.
 6. Download onder **Rapportage** het Excelbestand en/of het compacte A4-PDF-overzicht.
 
@@ -32,13 +34,13 @@ Het Excelrapport bevat drie tabbladen:
 - **Spelers**: de volledige spelerslijst.
 - **Resultaten**: eindranking en correlatieanalyse.
 
-Alle opgeslagen gegevens staan in `data/app.db`. Maak een kopie van dit bestand als back-up. Technische foutdetails staan lokaal in `data/app.log`.
+Download de gewenste rapporten voordat u de browser sluit. De app heeft bewust geen database of back-upfunctie. Via **Sessiedata wissen** kan de volledige tijdelijke werksessie direct worden verwijderd.
 
 ## Ondersteund in versie 0.1
 
 - Tekstgebaseerde CEV/WEVZA-bulletins met `FINAL TEAM LIST AND DELEGATION`.
 - Detectie van datumvolgorde op documentniveau, met verplichte keuze bij twijfel.
-- Positienormalisatie, validatie, lokale SQLite-opslag, ranking, correlaties, Excel-export en A4-PDF-export.
+- Positienormalisatie, validatie, tijdelijke sessieverwerking, ranking, correlaties, Excel-export en A4-PDF-export.
 - Een later uitbreidbaar `match`-datamodel; wedstrijdanalyse is nog niet aanwezig.
 
 Niet ondersteund: OCR voor gescande PDF's en algemene automatische herkenning van iedere willekeurige bondslay-out.
