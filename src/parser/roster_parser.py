@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import date
 from difflib import SequenceMatcher
@@ -28,6 +29,10 @@ POSITION_ALIASES = (
     "opposite hitter", "setter", "middle", "opposite",
 )
 OCR_CODE_TRANSLATION = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
+OCR_JERSEY_TRANSLATION = str.maketrans({
+    "O": "0", "I": "1", "L": "1", "|": "1", "!": "1",
+    "Z": "2", "S": "5", "G": "6", "B": "8",
+})
 
 
 @dataclass
@@ -150,6 +155,70 @@ class CEVRosterParser(BaseRosterParser):
         return jersey, full_name, position, raw_date, remainder
 
     @staticmethod
+    def _date_lines(text: str) -> list[str]:
+        """Return physical OCR lines containing a player-like date before officials."""
+        player_section = re.split(r"TEAM OFFICIAL", text, maxsplit=1, flags=re.IGNORECASE)[0]
+        return [
+            re.sub(r"\s+", " ", line).strip()
+            for line in player_section.splitlines()
+            if DATE_IN_LINE.search(line)
+        ]
+
+    @staticmethod
+    def _position_from_prefix(prefix: str, threshold: float = 0.60) -> tuple[str, str | None]:
+        words = prefix.split()
+        best: tuple[float, int, str] | None = None
+        for width in (1, 2):
+            if len(words) <= width:
+                continue
+            observed = " ".join(words[-width:]).lower().replace("|", "l")
+            for alias in POSITION_ALIASES:
+                score = SequenceMatcher(None, observed, alias).ratio()
+                if best is None or score > best[0]:
+                    best = (score, width, alias)
+        if best is None or best[0] < threshold:
+            return prefix.strip(), None
+        _, width, position = best
+        return " ".join(words[:-width]).strip(), position
+
+    @classmethod
+    def _salvage_date_line(cls, line: str) -> tuple[int | None, str, str, str, str] | None:
+        """Keep an OCR row even when its jersey column or row start is damaged."""
+        date_match = DATE_IN_LINE.search(line)
+        if not date_match:
+            return None
+        prefix = re.sub(r"^[^\wÀ-ÿ|!]+", "", line[:date_match.start()]).strip()
+        prefix = re.sub(r"^[|Il!]+\s*(?=\d{1,2}\s)", "", prefix)
+        remainder = line[date_match.end():].strip()
+        raw_date = date_match.group(0)
+        if not prefix:
+            return None
+
+        jersey: int | None = None
+        number_match = re.match(r"^(\d{1,2})\s+(.+)$", prefix)
+        if number_match:
+            jersey = int(number_match.group(1))
+            prefix = number_match.group(2).strip()
+        else:
+            tokens = prefix.split()
+            if len(tokens) >= 3 and len(tokens[0]) <= 2:
+                translated = tokens[0].upper().translate(OCR_JERSEY_TRANSLATION)
+                if translated.isdigit() and 0 < int(translated) <= 99:
+                    jersey = int(translated)
+                    prefix = " ".join(tokens[1:]).strip()
+
+        full_name, position_hint = cls._position_from_prefix(prefix)
+        if not full_name:
+            full_name = prefix or "Onbekende speler"
+        position = f"OCR controleren: {position_hint}" if position_hint else "OCR controleren"
+        return jersey, full_name, position, raw_date, remainder
+
+    @staticmethod
+    def _height_from_remainder(remainder: str) -> int | None:
+        numbers = [int(value) for value in re.findall(r"(?<!\w)(\d{1,3})(?!\w)", remainder)]
+        return next((value for value in numbers if 140 <= value <= 215), None)
+
+    @staticmethod
     def _player_lines(text: str) -> list[str]:
         lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
         result: list[str] = []
@@ -242,6 +311,7 @@ class CEVRosterParser(BaseRosterParser):
             player_section = re.split(r"TEAM OFFICIAL", roster, maxsplit=1, flags=re.IGNORECASE)[0]
             expected_rows = len(DATE_IN_LINE.findall(player_section))
             matched_rows = 0
+            matched_players: Counter[tuple[int | None, str]] = Counter()
             for line in self._player_lines(roster):
                 match = self._match_player_line(line)
                 if not match:
@@ -250,14 +320,15 @@ class CEVRosterParser(BaseRosterParser):
                     continue
                 matched_rows += 1
                 jersey, full_name, position, raw_date, remainder = match
-                numeric = re.findall(r"(?<!\w)(\d{1,3})(?!\w)", remainder)
-                height = int(numeric[1]) if len(numeric) >= 2 else None
+                jersey_number = int(jersey)
+                matched_players[(jersey_number, raw_date)] += 1
+                height = self._height_from_remainder(remainder)
                 last_name, first_name, split_ok = self._split_name(full_name)
                 candidates.append(
                     {
                         "country_code": country_code,
                         "country_name": country_name,
-                        "jersey_number": int(jersey),
+                        "jersey_number": jersey_number,
                         "last_name": last_name,
                         "first_name": first_name,
                         "full_name_original": full_name.strip(),
@@ -266,6 +337,38 @@ class CEVRosterParser(BaseRosterParser):
                         "height_cm": height,
                         "split_ok": split_ok,
                     }
+                )
+            salvaged_rows = 0
+            for line in self._date_lines(roster):
+                salvaged = self._salvage_date_line(line)
+                if not salvaged:
+                    continue
+                jersey, full_name, position, raw_date, remainder = salvaged
+                matched_key = (jersey, raw_date)
+                if jersey is not None and matched_players[matched_key] > 0:
+                    matched_players[matched_key] -= 1
+                    continue
+                last_name, first_name, split_ok = self._split_name(full_name)
+                candidates.append(
+                    {
+                        "country_code": country_code,
+                        "country_name": country_name,
+                        "jersey_number": jersey,
+                        "last_name": last_name,
+                        "first_name": first_name,
+                        "full_name_original": full_name.strip(),
+                        "position_original": position,
+                        "raw_birth_date": raw_date,
+                        "height_cm": self._height_from_remainder(remainder),
+                        "split_ok": split_ok,
+                    }
+                )
+                matched_rows += 1
+                salvaged_rows += 1
+            if salvaged_rows:
+                warnings.append(
+                    f"{country_code}: {salvaged_rows} onzekere OCR-regel(s) als conceptspeler toegevoegd. "
+                    "Controleer de gemarkeerde velden."
                 )
             if expected_rows > matched_rows:
                 warnings.append(
@@ -297,9 +400,10 @@ class CEVRosterParser(BaseRosterParser):
             if not item["split_ok"]:
                 row_warnings.append("Voor- en achternaam konden niet betrouwbaar worden gesplitst.")
             duplicate_key = (item["country_code"], item["jersey_number"])
-            if duplicate_key in seen:
-                row_warnings.append("Mogelijk dubbel rugnummer binnen hetzelfde team.")
-            seen.add(duplicate_key)
+            if item["jersey_number"] is not None:
+                if duplicate_key in seen:
+                    row_warnings.append("Mogelijk dubbel rugnummer binnen hetzelfde team.")
+                seen.add(duplicate_key)
             players.append(
                 ParsedPlayer(
                     **{key: item[key] for key in (

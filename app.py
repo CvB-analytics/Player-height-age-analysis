@@ -10,6 +10,8 @@ from src.ui.reports import render_reports
 from src.ui.results import render_results
 from src.ui.tournament import render_new_tournament, render_tournaments
 
+APP_VERSION = "0.4.0"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -64,6 +66,7 @@ def main() -> None:
     tournament = db.get_tournament(tournament_id) if tournament_id else None
     st.sidebar.divider()
     st.sidebar.caption(f"Actief: {tournament['name']}" if tournament else "Geen actief toernooi")
+    st.sidebar.caption(f"Appversie {APP_VERSION}")
     with st.sidebar.expander("Sessiedata wissen"):
         st.caption("Verwijdert direct alle toernooien en spelers uit deze browsersessie.")
         confirm_clear = st.checkbox("Ik wil alle sessiegegevens wissen.", key="confirm_clear_session")

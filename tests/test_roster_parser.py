@@ -96,6 +96,44 @@ TEAM OFFICIALS:"""
     assert any("tijdelijke code P01" in warning for warning in result.warnings)
 
 
+def test_date_rows_with_damaged_or_missing_jersey_are_added_as_concepts():
+    page = """SCANLAND (SCN)
+FINAL TEAM LIST AND DELEGATION
+Name & First Name Position Birth Date Weight Height
+1 ALPHA Anna Setter 13/03/09 65 180 230 290
+S BETA Bea Middle blocker 04/07/09 70 188 240 300
+GAMMA Gina Outside spiker 11/11/09 68 176 225 285
+4 DELTA Dora Libero 15/03/10 58 170 215 270
+TEAM OFFICIALS:"""
+
+    result = CEVRosterParser().parse([page])
+
+    assert len(result.players) == 4
+    concepts = [player for player in result.players if player.position_original.startswith("OCR controleren")]
+    assert len(concepts) == 2
+    assert concepts[0].jersey_number == 5
+    assert concepts[0].height_cm == 188
+    assert concepts[1].jersey_number is None
+    assert concepts[1].height_cm == 176
+    assert all(player.extraction_status == "Controleren" for player in concepts)
+    assert any("2 onzekere OCR-regel(s)" in warning for warning in result.warnings)
+    assert not any(warning.startswith("VOLLEDIGHEIDSCONTROLE: SCN") for warning in result.warnings)
+
+
+def test_height_uses_first_plausible_value_when_scan_columns_shift():
+    page = """SCANLAND (SCN)
+FINAL TEAM LIST AND DELEGATION
+Name & First Name Position Birth Date Weight Height
+1 ALPHA Anna Setter 13/03/09 1 178 227 271
+2 BETA Bea Middle blocker 04/07/09 176 1 220 274
+3 GAMMA Gina Libero 11/11/09 58 170 215 270
+TEAM OFFICIALS:"""
+
+    result = CEVRosterParser().parse([page])
+
+    assert [player.height_cm for player in result.players] == [178, 176, 170]
+
+
 def test_synthetic_bulletin_integration(synthetic_bulletin):
     result = parse_bulletin(str(synthetic_bulletin))
     assert len(result.teams) == 6
