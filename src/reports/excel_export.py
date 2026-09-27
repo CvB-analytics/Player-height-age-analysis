@@ -80,7 +80,9 @@ def _overview(ws, report: dict[str, Any]) -> None:
     position_headers = ["Positie", "#", "Gem. lengte", "Gem. leeftijd"]
     _write_table(ws, position_start, 11, position_headers, [[row.get(key) for key in ("position", "players", "avg_height", "avg_age")] for row in report["positions"]], "PositiesTabel")
 
-    year_start = 18
+    country_end = country_start + len(country_rows)
+    compact_layout = len(country_rows) <= 7
+    year_start = 18 if compact_layout else country_end + 2
     _write_table(ws, year_start, 1, ["Geboortejaar", "# spelers"], [[year, count] for year, count in report["birth_years"].items()], "JarenTabel")
     quarter_start = year_start
     _write_table(ws, quarter_start, 4, ["Kwartaal", "# spelers"], [[q, report["quarters"][q]] for q in ("Q1", "Q2", "Q3", "Q4")], "KwartalenTabel")
@@ -114,7 +116,10 @@ def _overview(ws, report: dict[str, Any]) -> None:
             chart.y_axis.scaling.max = ceil(max(heights) / 2) * 2 + 2
             chart.y_axis.majorUnit = 2
         _color_points(chart, len(report["countries"]))
-        ws.add_chart(chart, "H24")
+        chart_start = 24 if compact_layout else year_start + max(len(report["birth_years"]), 4) + 2
+        if not compact_layout:
+            chart.height = 7.2
+        ws.add_chart(chart, f"H{chart_start}")
 
     quarter_chart = _column_chart("Geboortekwartaal alle spelers", "Kwartaal", "Aantal spelers")
     quarter_chart.add_data(Reference(ws, min_col=5, min_row=quarter_start, max_row=quarter_start + 4), titles_from_data=True)
@@ -122,7 +127,10 @@ def _overview(ws, report: dict[str, Any]) -> None:
     quarter_chart.y_axis.scaling.min = 0
     quarter_chart.y_axis.scaling.max = ceil(max(report["quarters"].values()) / 5) * 5 + 5
     _color_points(quarter_chart, 4)
-    ws.add_chart(quarter_chart, "A24")
+    chart_start = 24 if compact_layout else year_start + max(len(report["birth_years"]), 4) + 2
+    if not compact_layout:
+        quarter_chart.height = 7.2
+    ws.add_chart(quarter_chart, f"A{chart_start}")
 
     _finish_sheet(ws, widths={"A": 11, "B": 11, "C": 11, "D": 15, "E": 20, "F": 8, "G": 8, "H": 8, "I": 8, "J": 2, "K": 18, "L": 13, "M": 15, "N": 15}, freeze="A10")
     ws.freeze_panes = None
@@ -130,12 +138,13 @@ def _overview(ws, report: dict[str, Any]) -> None:
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
     ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1
+    ws.page_setup.fitToHeight = 1 if compact_layout else 2
     ws.page_margins.left = 0.25
     ws.page_margins.right = 0.25
     ws.page_margins.top = 0.3
     ws.page_margins.bottom = 0.3
-    ws.print_area = "A1:N39"
+    print_end = 39 if compact_layout else chart_start + 15
+    ws.print_area = f"A1:N{print_end}"
     ws.oddFooter.center.text = "Lokaal gegenereerd toernooioverzicht"
     ws.sheet_properties.tabColor = NAVY
 

@@ -1,5 +1,8 @@
 from datetime import date
 from io import BytesIO
+
+import pandas as pd
+import pdfplumber
 from openpyxl import load_workbook
 
 from src.parser.roster_parser import parse_bulletin
@@ -52,3 +55,52 @@ def test_pdf_database_report_roundtrip(tmp_path, synthetic_bulletin):
     assert workbook["Overzicht"].print_area == "'Overzicht'!$A$1:$N$39"
     pdf = create_pdf_report(report)
     assert pdf.startswith(b"%PDF")
+
+
+def test_sixteen_team_exports_do_not_overlap_tables_and_charts():
+    codes = ["BUL", "BEL", "ITA", "POL", "GER", "ESP", "SLO", "HUN", "TUR", "CRO", "GRE", "ROU", "NED", "FIN", "SRB", "LTU"]
+    countries = [
+        {
+            "country_code": code,
+            "players": 14,
+            "avg_age": 16.1 + index / 25,
+            "avg_net_height": 177.2 + (index % 8) * 1.25,
+            "Q1": 3, "Q2": 4, "Q3": 3, "Q4": 4,
+        }
+        for index, code in enumerate(codes)
+    ]
+    report = {
+        "tournament": {
+            "name": "EK U18W 2024", "category": "U18", "gender": "Women",
+            "location": "ROU", "start_date": date(2024, 7, 1), "source_file": "bulletin.pdf",
+        },
+        "summary": {"teams": 16, "players": 224, "avg_age": 16.51, "avg_height": 179.81},
+        "countries": countries,
+        "positions": [
+            {"position": code, "players": 40, "avg_height": 181.0, "avg_age": 16.5}
+            for code in ("DIA", "LIB", "MB", "PL", "SV")
+        ],
+        "birth_years": {2007: 120, 2008: 85, 2009: 17, 2010: 2},
+        "quarters": {"Q1": 75, "Q2": 63, "Q3": 43, "Q4": 43},
+        "correlations": {"ranking_height": -0.501, "ranking_age": 0.290},
+        "results": [
+            {"country_code": code, "ranking": index + 1, "avg_net_height": countries[index]["avg_net_height"], "avg_age": countries[index]["avg_age"]}
+            for index, code in enumerate(codes)
+        ],
+        "teams": [{"country_code": code, "final_ranking": index + 1} for index, code in enumerate(codes)],
+        "players_frame": pd.DataFrame(),
+    }
+
+    workbook = load_workbook(BytesIO(create_excel_report(report)))
+    overview = workbook["Overzicht"]
+    country_end = overview.tables["LandenTabel"].ref.split(":")[1]
+    year_start = overview.tables["JarenTabel"].ref.split(":")[0]
+    assert int("".join(filter(str.isdigit, year_start))) > int("".join(filter(str.isdigit, country_end)))
+    assert all(chart.anchor._from.row + 1 >= 34 for chart in overview._charts)
+    assert overview.page_setup.fitToWidth == 1
+    assert overview.page_setup.fitToHeight == 2
+
+    pdf_bytes = create_pdf_report(report)
+    with pdfplumber.open(BytesIO(pdf_bytes)) as document:
+        text = document.pages[0].extract_text() or ""
+    assert all(code in text for code in codes)

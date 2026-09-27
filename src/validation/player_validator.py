@@ -9,6 +9,8 @@ from src.parser.position_parser import normalize_position
 
 def validate_player(row: dict[str, Any], tournament_start: date | None = None) -> list[str]:
     warnings: list[str] = []
+    if not str(row.get("country_code") or "").strip():
+        warnings.append("Land ontbreekt.")
     if not row.get("jersey_number"):
         warnings.append("Rugnummer ontbreekt.")
     if not str(row.get("last_name") or "").strip():

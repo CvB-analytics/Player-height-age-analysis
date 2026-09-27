@@ -22,6 +22,9 @@ st.markdown(
     .block-container {padding-top: 2rem; max-width: 1500px;}
     [data-testid="stMetric"] {background:#eef5f9; border:1px solid #d8e4ec; padding:14px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.08);}
     [data-testid="stMetric"] * {color:#17324D !important;}
+    .team-count-grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(82px,1fr)); gap:7px; margin:2px 0 12px;}
+    .team-count {display:flex; align-items:center; justify-content:space-between; gap:8px; background:#eef5f9; border:1px solid #d8e4ec; border-radius:8px; padding:7px 10px; color:#17324D; font-size:.9rem;}
+    .team-count strong {font-size:1rem;}
     </style>
     """,
     unsafe_allow_html=True,

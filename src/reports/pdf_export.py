@@ -86,9 +86,15 @@ def _tables(c: canvas.Canvas, report: dict[str, Any], width: float, height: floa
             row["country_code"], _shown(result_map.get(row["country_code"], {}).get("ranking")), row["players"],
             _shown(row["avg_age"], 2), _shown(row["avg_net_height"], 1), row["Q1"], row["Q2"], row["Q3"], row["Q4"],
         ])
+    team_count = len(country_rows)
+    chart_y, chart_height = _chart_layout(team_count)
+    table_top = height - 151
+    available_table_height = table_top - (chart_y + chart_height + 10)
+    country_row_height = min(15, max(8, available_table_height / max(1, team_count + 1)))
+    country_font_size = min(7, max(5.5, country_row_height - 4))
     _draw_table(
         c, 28, height - 151, ["Land", "Rank", "Spelers", "Leeftijd", "Netlengte", "Q1", "Q2", "Q3", "Q4"],
-        country_rows, [38, 34, 43, 50, 56, 30, 30, 30, 30], 15,
+        country_rows, [38, 34, 43, 50, 56, 30, 30, 30, 30], country_row_height, country_font_size,
     )
 
     position_rows = [[r["position"], r["players"], _shown(r["avg_height"], 1), _shown(r["avg_age"], 2)] for r in report["positions"]]
@@ -119,41 +125,47 @@ def _tables(c: canvas.Canvas, report: dict[str, Any], width: float, height: floa
     _draw_wrapped(c, note, 620, y + 3, 190, 8)
 
 
-def _draw_table(c, x, top, headers, rows, widths, row_height) -> None:
+def _draw_table(c, x, top, headers, rows, widths, row_height, font_size=7) -> None:
     total_width = sum(widths)
     c.setFillColor(NAVY)
     c.rect(x, top - row_height, total_width, row_height, fill=1, stroke=0)
     cursor = x
-    c.setFont("Helvetica-Bold", 7)
+    c.setFont("Helvetica-Bold", font_size)
     c.setFillColor(colors.white)
     for header, col_width in zip(headers, widths):
-        c.drawCentredString(cursor + col_width / 2, top - row_height + 4.5, header)
+        c.drawCentredString(cursor + col_width / 2, top - row_height + max(2.5, (row_height - font_size) / 2), header)
         cursor += col_width
     for row_index, row in enumerate(rows):
         y = top - row_height * (row_index + 2)
         c.setFillColor(colors.white if row_index % 2 else LIGHT)
         c.rect(x, y, total_width, row_height, fill=1, stroke=0)
         cursor = x
-        c.setFont("Helvetica", 7)
+        c.setFont("Helvetica", font_size)
         c.setFillColor(TEXT)
         for value, col_width in zip(row, widths):
             text = str(value if value is not None else "")
-            while stringWidth(text, "Helvetica", 7) > col_width - 5 and text:
+            while stringWidth(text, "Helvetica", font_size) > col_width - 5 and text:
                 text = text[:-1]
-            c.drawCentredString(cursor + col_width / 2, y + 4.5, text)
+            c.drawCentredString(cursor + col_width / 2, y + max(2.5, (row_height - font_size) / 2), text)
             cursor += col_width
         c.setStrokeColor(GRID)
         c.line(x, y, x + total_width, y)
 
 
 def _charts(c: canvas.Canvas, report: dict[str, Any], width: float) -> None:
-    _bar_panel(c, 28, 36, 380, 238, "Geboortekwartaal alle spelers", list(report["quarters"]), list(report["quarters"].values()), 0, None)
     countries = report["countries"]
+    chart_y, chart_height = _chart_layout(len(countries))
+    _bar_panel(c, 28, chart_y, 380, chart_height, "Geboortekwartaal alle spelers", list(report["quarters"]), list(report["quarters"].values()), 0, None)
     values = [r["avg_net_height"] for r in countries]
     available = [value for value in values if value is not None]
     y_min = max(0, floor(min(available) / 5) * 5 - 5) if available else 0
     y_max = ceil(max(available) / 5) * 5 + 5 if available else 200
-    _bar_panel(c, 430, 36, 382, 238, "Gem. lengte netspelers per land", [r["country_code"] for r in countries], values, y_min, y_max)
+    _bar_panel(c, 430, chart_y, 382, chart_height, "Gem. lengte netspelers per land", [r["country_code"] for r in countries], values, y_min, y_max)
+
+
+def _chart_layout(team_count: int) -> tuple[float, float]:
+    """Keep a one-page A4 overview while reserving enough room for larger country tables."""
+    return (36, 238) if team_count <= 9 else (28, 200)
 
 
 def _bar_panel(c, x, y, panel_width, panel_height, title, labels, values, y_min, y_max) -> None:
@@ -178,16 +190,17 @@ def _bar_panel(c, x, y, panel_width, panel_height, title, labels, values, y_min,
         c.drawRightString(plot_x - 5, grid_y - 2, f"{value:.0f}")
     slot = plot_w / max(1, len(labels))
     bar_width = min(38, slot * 0.55)
+    label_font = 7 if len(labels) <= 12 else max(5, 7 - (len(labels) - 12) * 0.18)
     for index, (label, value) in enumerate(zip(labels, numeric)):
         bar_x = plot_x + index * slot + (slot - bar_width) / 2
         bar_h = max(0, (value - y_min) / span * plot_h)
         c.setFillColor(colors.HexColor(PALETTE[index % len(PALETTE)]))
         c.rect(bar_x, plot_y, bar_width, bar_h, fill=1, stroke=0)
         c.setFillColor(TEXT)
-        c.setFont("Helvetica-Bold", 7)
-        shown = f"{value:.1f}" if value % 1 else f"{value:.0f}"
+        c.setFont("Helvetica-Bold", label_font)
+        shown = f"{value:.0f}"
         c.drawCentredString(bar_x + bar_width / 2, plot_y + bar_h + 4, shown)
-        c.setFont("Helvetica", 7)
+        c.setFont("Helvetica", label_font)
         c.drawCentredString(bar_x + bar_width / 2, plot_y - 11, str(label))
 
 
