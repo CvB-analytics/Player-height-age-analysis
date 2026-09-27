@@ -4,19 +4,30 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from datetime import date
+from difflib import SequenceMatcher
 from typing import Any
 
 from .date_parser import DateOrder, detect_date_order, parse_date
 from .pdf_reader import extract_pages
 from .position_parser import normalize_position
 
-TEAM_RE = re.compile(r"(?m)^\s*([A-Z][A-Z ]{2,}?)\s+\(([A-Z]{3})\)\s*$")
+TEAM_RE = re.compile(r"(?mi)^\s*([^\r\n()]{2,80}?)\s*\(\s*([A-Z0-9]{3})\s*\)\s*$")
+TEAM_CODE_RE = re.compile(r"\(\s*([A-Z0-9]{3})\s*\)", re.IGNORECASE)
 POSITION = r"Libero(?:\s+[12])?|Setter|Outside spiker|Outside hitter|Middle blocker|Middle|Opposite(?: hitter)?"
 PLAYER_RE = re.compile(
     rf"^\s*(\d{{1,2}})\s+(.+?)\s+({POSITION})\s+(\d{{1,4}}[./-]\d{{1,2}}[./-]\d{{1,4}})\s+(.+)$",
     re.IGNORECASE,
 )
+FALLBACK_PLAYER_RE = re.compile(
+    r"^\s*(\d{1,2})\s+(.+?)\s+(\d{1,4}[./-]\d{1,2}[./-]\d{1,4})\s+(.+)$",
+    re.IGNORECASE,
+)
 DATE_IN_LINE = re.compile(r"\b\d{1,4}[./-]\d{1,2}[./-]\d{1,4}\b")
+POSITION_ALIASES = (
+    "libero 1", "libero 2", "outside spiker", "outside hitter", "middle blocker",
+    "opposite hitter", "setter", "middle", "opposite",
+)
+OCR_CODE_TRANSLATION = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
 
 
 @dataclass
@@ -82,6 +93,63 @@ class CEVRosterParser(BaseRosterParser):
         )
 
     @staticmethod
+    def _team_from_page(page: str) -> tuple[str, str] | None:
+        header_position = page.upper().find("FINAL TEAM LIST")
+        header = page[:header_position] if header_position >= 0 else page
+        matches = list(TEAM_RE.finditer(header))
+        if matches:
+            match = matches[-1]
+            country_name = re.sub(r"\s+", " ", match.group(1)).strip().title()
+            raw_code = match.group(2)
+        else:
+            code_matches = list(TEAM_CODE_RE.finditer(header))
+            if not code_matches:
+                return None
+            code_match = code_matches[-1]
+            raw_code = code_match.group(1)
+            preceding_line = header[:code_match.start()].splitlines()[-1] if header[:code_match.start()].splitlines() else ""
+            country_name = re.sub(r"\s+", " ", preceding_line).strip(" -|").title()
+        country_code = raw_code.upper().translate(OCR_CODE_TRANSLATION)
+        if not re.fullmatch(r"[A-Z]{3}", country_code):
+            return None
+        if not country_name:
+            country_name = country_code
+        return country_name, country_code
+
+    @staticmethod
+    def _match_player_line(line: str) -> tuple[str, str, str, str, str] | None:
+        exact = PLAYER_RE.match(line)
+        if exact:
+            return exact.groups()
+        fallback = FALLBACK_PLAYER_RE.match(line)
+        if not fallback:
+            return None
+        jersey, prefix, raw_date, remainder = fallback.groups()
+        words = prefix.split()
+        best: tuple[float, int, str] | None = None
+        for width in (1, 2):
+            if len(words) <= width:
+                continue
+            observed = " ".join(words[-width:]).lower().replace("|", "l")
+            for alias in POSITION_ALIASES:
+                score = SequenceMatcher(None, observed, alias).ratio()
+                if best is None or score > best[0]:
+                    best = (score, width, alias)
+        if best is None or best[0] < 0.72:
+            # Keep a date-bearing row even when OCR has damaged the position.
+            # The complete text before the date is retained as the original
+            # name so the coach can correct it instead of recreating the row.
+            full_name = prefix.strip()
+            if not full_name:
+                return None
+            return jersey, full_name, "Onbekend", raw_date, remainder
+        _, width, position = best
+        full_name = " ".join(words[:-width]).strip()
+        if not full_name:
+            return None
+        return jersey, full_name, position, raw_date, remainder
+
+    @staticmethod
     def _player_lines(text: str) -> list[str]:
         lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
         result: list[str] = []
@@ -89,6 +157,7 @@ class CEVRosterParser(BaseRosterParser):
         pending_prefix = ""
         late_name_continuation = False
         for line in lines:
+            line = re.sub(r"^[|Il!]+\s*(?=\d{1,2}\s)", "", line)
             upper = line.upper()
             if not line or upper.startswith("TEAM OFFICIAL"):
                 if current:
@@ -153,26 +222,34 @@ class CEVRosterParser(BaseRosterParser):
         teams: list[dict[str, str]] = []
         warnings: list[str] = []
 
-        for page in pages:
+        for page_number, page in enumerate(pages, start=1):
             if not self._is_roster_page(page):
                 continue
-            team_match = TEAM_RE.search(page)
-            if not team_match:
-                warnings.append("Een rosterpagina had geen betrouwbaar herkenbare teamkop.")
-                continue
-            country_name = re.sub(r"\s+", " ", team_match.group(1)).title()
-            country_code = team_match.group(2)
+            team = self._team_from_page(page)
+            if not team:
+                country_code = f"P{page_number:02d}"[-3:]
+                country_name = f"Onbekend team pagina {page_number}"
+                warnings.append(
+                    f"VOLLEDIGHEIDSCONTROLE: De teamkop op pagina {page_number} was niet herkenbaar. "
+                    f"De spelers zijn opgenomen onder tijdelijke code {country_code}; corrigeer teamnaam en code."
+                )
+            else:
+                country_name, country_code = team
             teams.append({"country_code": country_code, "country_name": country_name})
 
             header_position = page.upper().find("FINAL TEAM LIST")
             roster = page[header_position:] if header_position >= 0 else page
+            player_section = re.split(r"TEAM OFFICIAL", roster, maxsplit=1, flags=re.IGNORECASE)[0]
+            expected_rows = len(DATE_IN_LINE.findall(player_section))
+            matched_rows = 0
             for line in self._player_lines(roster):
-                match = PLAYER_RE.match(line)
+                match = self._match_player_line(line)
                 if not match:
                     if DATE_IN_LINE.search(line):
-                        warnings.append(f"Mogelijke spelersregel niet herkend ({country_code}): {line[:90]}")
+                        warnings.append(f"Mogelijke spelersregel niet herkend ({country_code}).")
                     continue
-                jersey, full_name, position, raw_date, remainder = match.groups()
+                matched_rows += 1
+                jersey, full_name, position, raw_date, remainder = match
                 numeric = re.findall(r"(?<!\w)(\d{1,3})(?!\w)", remainder)
                 height = int(numeric[1]) if len(numeric) >= 2 else None
                 last_name, first_name, split_ok = self._split_name(full_name)
@@ -189,6 +266,11 @@ class CEVRosterParser(BaseRosterParser):
                         "height_cm": height,
                         "split_ok": split_ok,
                     }
+                )
+            if expected_rows > matched_rows:
+                warnings.append(
+                    f"VOLLEDIGHEIDSCONTROLE: {country_code} bevat circa {expected_rows} spelersregels, "
+                    f"maar er zijn er {matched_rows} herkend. Controleer en vul ontbrekende spelers aan."
                 )
 
         detected = detect_date_order(item["raw_birth_date"] for item in candidates)

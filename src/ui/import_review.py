@@ -71,7 +71,9 @@ def render_import(db: Database) -> None:
             st.session_state["parser_warnings"] = result.warnings
             st.rerun()
 
-    for warning in st.session_state.get("parser_warnings", []):
+    parser_warnings = st.session_state.get("parser_warnings", [])
+    completeness_warnings = [warning for warning in parser_warnings if warning.startswith("VOLLEDIGHEIDSCONTROLE:")]
+    for warning in parser_warnings:
         st.warning(warning)
     frame = pd.DataFrame(rows)
     start = date.fromisoformat(tournament["start_date"])
@@ -85,6 +87,7 @@ def render_import(db: Database) -> None:
         st.warning(f"{issues} regels controleren. Open de kolom 'Waarschuwing' voor uitleg.")
     else:
         st.success("Geen automatische waarschuwingen gevonden.")
+    st.caption("Controleer altijd of het aantal gevonden teams en spelers overeenkomt met het brondocument.")
     edited = st.data_editor(
         review,
         hide_index=True,
@@ -94,7 +97,14 @@ def render_import(db: Database) -> None:
         num_rows="dynamic",
         key="import_editor",
     )
-    if st.button("Import goedkeuren en gebruiken", type="primary"):
+    completeness_confirmed = True
+    if completeness_warnings:
+        st.error("De automatische volledigheidscontrole vond mogelijk ontbrekende teams of spelers.")
+        completeness_confirmed = st.checkbox(
+            "Ik heb alle rosterpagina's gecontroleerd en ontbrekende spelers handmatig aangevuld.",
+            key="confirm_import_completeness",
+        )
+    if st.button("Import goedkeuren en gebruiken", type="primary", disabled=not completeness_confirmed):
         internal = edited.rename(columns={value: key for key, value in DISPLAY_COLUMNS.items()})
         saved_rows = internal.to_dict("records")
         by_key = {_row_key(r): r for r in rows if _row_key(r) is not None}
@@ -110,7 +120,7 @@ def render_import(db: Database) -> None:
             return
         db.save_players(tournament_id, saved_rows)
         db.update_tournament_source(tournament_id, st.session_state.get("import_filename", ""))
-        for key in ("import_result", "import_pdf_bytes", "import_filename", "import_date_order", "import_profile", "import_date_choice", "parser_warnings"):
+        for key in ("import_result", "import_pdf_bytes", "import_filename", "import_date_order", "import_profile", "import_date_choice", "parser_warnings", "confirm_import_completeness"):
             st.session_state.pop(key, None)
         st.success("De import is goedgekeurd en tijdelijk in deze sessie beschikbaar.")
         st.rerun()
