@@ -1,4 +1,4 @@
-from src.parser.roster_parser import CEVRosterParser, parse_bulletin
+from src.parser.roster_parser import CEVRosterParser, FIVBRosterParser, parse_bulletin
 
 
 def test_cev_player_line_recognition():
@@ -15,6 +15,34 @@ TEAM OFFICIAL
     assert result.players[0].last_name == "POLO MARTÍNEZ"
     assert result.players[0].height_cm == 158
     assert result.players[1].position_normalized == "SV"
+
+
+def test_fivb_team_composition_profile_recognizes_named_month_dates():
+    page = """FIVB Volleyball Women's U21 World Championship
+Team composition
+ARG ● Argentina
+PLAYERS
+Shirt no Last name First name Shirt name Pos. Birthdate Height [cm]
+1 Perez Dalma Nicole Perez OH 01-Apr-2004 181 295 295 GELP (ARG)
+2 Balague Emilia Balague S 08-Dec-2004 181 289 270 Villa Dora (ARG)
+7 Perez Sain Constanza Perez Sain OP 15-Dec-2004 184 298 288 UPCN (ARG)
+10 Garcia Avril Garcia MB 26-Sep-2004 186 304 280 GELP (ARG)
+20 C Caballero Victoria Caballero L 01-Aug-2004 168 275 250 River Plate (ARG)
+OFFICIALS"""
+
+    parser = FIVBRosterParser()
+    assert parser.supports([page])
+
+    result = parser.parse([page])
+
+    assert result.profile == "FIVB"
+    assert result.date_order == "DMY"
+    assert len(result.players) == 5
+    assert result.teams == [{"country_code": "ARG", "country_name": "Argentina"}]
+    assert result.players[0].birth_date.isoformat() == "2004-04-01"
+    assert result.players[0].height_cm == 181
+    assert result.players[0].position_normalized == "PL"
+    assert result.players[-1].position_normalized == "LIB"
 
 
 def test_recognizes_roster_from_columns_without_exact_legacy_heading():

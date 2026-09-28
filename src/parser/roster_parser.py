@@ -6,6 +6,8 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import date
 from difflib import SequenceMatcher
+from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from .date_parser import DateOrder, detect_date_order, parse_date
@@ -33,6 +35,19 @@ OCR_JERSEY_TRANSLATION = str.maketrans({
     "O": "0", "I": "1", "L": "1", "|": "1", "!": "1",
     "Z": "2", "S": "5", "G": "6", "B": "8",
 })
+FIVB_TEAM_RE = re.compile(r"(?mi)^\s*([A-Z]{3})\s+[●•]\s+([^\r\n]+?)\s*$")
+FIVB_DATE = r"\d{1,2}-[A-Za-z]{3}-\d{4}"
+FIVB_PLAYER_RE = re.compile(
+    rf"^\s*(\d{{1,2}})\s+(?:C\s+)?(.+?)\s+(OH|OP|MB|S|L)\s+({FIVB_DATE})\s+(\d{{3}})\b",
+    re.IGNORECASE,
+)
+FIVB_POSITION_MAPPING = {
+    "S": "Setter",
+    "OH": "Outside spiker",
+    "OP": "Opposite",
+    "MB": "Middle blocker",
+    "L": "Libero",
+}
 
 
 @dataclass
@@ -421,6 +436,180 @@ class CEVRosterParser(BaseRosterParser):
         return ParseResult(self.name, detected if not forced_date_order else forced_date_order, players, teams, warnings)
 
 
+class FIVBRosterParser(BaseRosterParser):
+    """Parser for FIVB Team composition tables with named month dates."""
+
+    name = "FIVB"
+
+    def supports(self, pages: list[str]) -> bool:
+        return any(self._is_roster_page(page) for page in pages)
+
+    @staticmethod
+    def _is_roster_page(page: str) -> bool:
+        upper = page.upper()
+        return (
+            "TEAM COMPOSITION" in upper
+            and "BIRTHDATE" in upper
+            and "SHIRT" in upper
+            and bool(FIVB_TEAM_RE.search(page))
+        )
+
+    @staticmethod
+    def _team_from_page(page: str) -> tuple[str, str] | None:
+        match = FIVB_TEAM_RE.search(page)
+        if not match:
+            return None
+        return re.sub(r"\s+", " ", match.group(2)).strip(), match.group(1).upper()
+
+    @staticmethod
+    def _numeric_date(raw_date: str) -> str | None:
+        parsed = parse_date(raw_date.replace("-", " "), "DMY")
+        return parsed.strftime("%d/%m/%Y") if parsed else None
+
+    @staticmethod
+    def _clean_cell(value: Any) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).strip()
+
+    @classmethod
+    def _synthetic_page(
+        cls,
+        team: tuple[str, str],
+        rows: list[tuple[int, str, str, str, str, int]],
+    ) -> str:
+        country_name, country_code = team
+        lines = [
+            f"{country_name} ({country_code})",
+            "FINAL TEAM LIST AND DELEGATION",
+            "Name & First Name Position Birth Date Weight Height",
+        ]
+        for jersey, last_name, first_name, position, raw_date, height in rows:
+            numeric_date = cls._numeric_date(raw_date)
+            if not numeric_date:
+                continue
+            full_name = f"{last_name.upper()} {first_name}".strip()
+            lines.append(
+                f"{jersey} {full_name} {FIVB_POSITION_MAPPING[position.upper()]} "
+                f"{numeric_date} 0 {height}"
+            )
+        lines.append("TEAM OFFICIALS:")
+        return "\n".join(lines)
+
+    @classmethod
+    def _rows_from_tables(cls, tables: list[list[list[Any]]]) -> list[tuple[int, str, str, str, str, int]]:
+        for table in tables:
+            header = " ".join(cls._clean_cell(cell) for row in table[:3] for cell in row)
+            if "Birthdate" not in header or "Last name" not in header:
+                continue
+            rows: list[tuple[int, str, str, str, str, int]] = []
+            for row in table[3:]:
+                if len(row) < 7:
+                    continue
+                jersey_match = re.match(r"^(\d{1,2})\b", cls._clean_cell(row[0]))
+                position = cls._clean_cell(row[4]).upper()
+                raw_date = cls._clean_cell(row[5])
+                height_text = cls._clean_cell(row[6])
+                if not jersey_match or position not in FIVB_POSITION_MAPPING or not re.fullmatch(FIVB_DATE, raw_date):
+                    continue
+                if not height_text.isdigit():
+                    continue
+                rows.append((
+                    int(jersey_match.group(1)),
+                    cls._clean_cell(row[1]),
+                    cls._clean_cell(row[2]),
+                    position,
+                    raw_date,
+                    int(height_text),
+                ))
+            if rows:
+                return rows
+        return []
+
+    @staticmethod
+    def _split_text_name(prefix: str) -> tuple[str, str]:
+        """Best-effort fallback when PDF table geometry is unavailable."""
+        tokens = prefix.split()
+        if len(tokens) < 2:
+            return prefix, ""
+        normalized = [re.sub(r"[^a-z0-9]", "", token.casefold()) for token in tokens]
+        shirt_start: int | None = None
+        match_at: int | None = None
+        for start in range(1, len(tokens)):
+            first = normalized[start]
+            previous = next((index for index, value in enumerate(normalized[:start]) if value == first), None)
+            if previous is not None:
+                shirt_start, match_at = start, previous
+                break
+        if shirt_start is None:
+            official = tokens[:-1] if len(tokens) > 2 else tokens
+            return official[0], " ".join(official[1:])
+        official = tokens[:shirt_start]
+        boundary = match_at if match_at and match_at > 0 else 1
+        return " ".join(official[:boundary]), " ".join(official[boundary:])
+
+    @classmethod
+    def _rows_from_text(cls, page: str) -> list[tuple[int, str, str, str, str, int]]:
+        rows: list[tuple[int, str, str, str, str, int]] = []
+        for line in page.splitlines():
+            match = FIVB_PLAYER_RE.match(re.sub(r"\s+", " ", line).strip())
+            if not match:
+                continue
+            jersey, prefix, position, raw_date, height = match.groups()
+            last_name, first_name = cls._split_text_name(prefix)
+            rows.append((int(jersey), last_name, first_name, position.upper(), raw_date, int(height)))
+        return rows
+
+    def _parse_synthetic(
+        self,
+        synthetic_pages: list[str],
+        forced_date_order: DateOrder | None,
+    ) -> ParseResult:
+        result = CEVRosterParser().parse(synthetic_pages, forced_date_order)
+        result.profile = self.name
+        return result
+
+    def parse(self, pages: list[str], forced_date_order: DateOrder | None = None) -> ParseResult:
+        synthetic_pages = []
+        for page in pages:
+            if not self._is_roster_page(page):
+                continue
+            team = self._team_from_page(page)
+            if team:
+                synthetic_pages.append(self._synthetic_page(team, self._rows_from_text(page)))
+        return self._parse_synthetic(synthetic_pages, forced_date_order)
+
+    def parse_document(
+        self,
+        source: bytes | str,
+        pages: list[str],
+        forced_date_order: DateOrder | None = None,
+    ) -> ParseResult:
+        """Use PDF table geometry when available and fall back to extracted text per page."""
+        fallback_by_page: dict[int, str] = {}
+        for index, page in enumerate(pages):
+            if not self._is_roster_page(page):
+                continue
+            team = self._team_from_page(page)
+            if team:
+                fallback_by_page[index] = self._synthetic_page(team, self._rows_from_text(page))
+
+        structured_by_page: dict[int, str] = {}
+        raw = source if isinstance(source, bytes) else Path(source).read_bytes()
+        try:
+            import pdfplumber
+
+            with pdfplumber.open(BytesIO(raw)) as pdf:
+                for index in fallback_by_page:
+                    team = self._team_from_page(pages[index])
+                    rows = self._rows_from_tables(pdf.pages[index].extract_tables())
+                    if team and rows:
+                        structured_by_page[index] = self._synthetic_page(team, rows)
+        except Exception:
+            structured_by_page = {}
+
+        merged = [structured_by_page.get(index, page) for index, page in fallback_by_page.items()]
+        return self._parse_synthetic(merged, forced_date_order)
+
+
 class GenericRosterParser(BaseRosterParser):
     name = "generiek"
 
@@ -442,6 +631,8 @@ class GenericRosterParser(BaseRosterParser):
 
 def parse_bulletin(source: bytes | str, forced_date_order: DateOrder | None = None) -> ParseResult:
     pages = extract_pages(source)
-    parsers: list[BaseRosterParser] = [CEVRosterParser(), GenericRosterParser()]
+    parsers: list[BaseRosterParser] = [CEVRosterParser(), FIVBRosterParser(), GenericRosterParser()]
     parser = next(candidate for candidate in parsers if candidate.supports(pages))
+    if isinstance(parser, FIVBRosterParser):
+        return parser.parse_document(source, pages, forced_date_order)
     return parser.parse(pages, forced_date_order)
