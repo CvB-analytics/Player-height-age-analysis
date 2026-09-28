@@ -32,3 +32,13 @@ def test_blank_country_stays_visible_and_is_marked_for_review():
     assert len(result) == 1
     assert "Land ontbreekt" in result.iloc[0]["Opmerking"]
     assert _team_counts(result) == {"Nog zonder land": 1}
+
+
+def test_deleted_player_is_removed_and_team_counts_update():
+    records = [_row("ESP", 1, "Alpha"), _row("ESP", 2, "Bravo"), _row("NED", 3, "Delta")]
+    state = {"edited_rows": {}, "deleted_rows": [1], "added_rows": []}
+
+    result = _apply_editor_patch(records, state, date(2026, 8, 25))
+
+    assert list(zip(result["Land"], result["Rugnr"])) == [("ESP", 1), ("NED", 3)]
+    assert _team_counts(result) == {"ESP": 1, "NED": 1}

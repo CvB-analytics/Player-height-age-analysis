@@ -36,7 +36,7 @@ def extract_pages(source: bytes | str | Path) -> list[str]:
 
     if not any(len(page.strip()) > 80 for page in pages):
         raise NoUsableTextError(
-            "Deze PDF bevat geen bruikbare tekst en kon ook niet met lokale OCR worden gelezen."
+            "Deze PDF bevat geen bruikbare tekst en kon niet betrouwbaar worden gelezen."
         )
     return pages
 

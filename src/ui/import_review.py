@@ -101,6 +101,10 @@ def render_import(db: Database) -> None:
     else:
         st.success("Geen automatische waarschuwingen gevonden.")
     st.caption("Controleer altijd of het aantal gevonden teams en spelers overeenkomt met het brondocument.")
+    st.caption(
+        "Regel toevoegen: gebruik de lege rij onderaan. Regel verwijderen: selecteer de rij via het vak links "
+        "en gebruik de prullenbak (of Delete/Backspace)."
+    )
     editor_version = int(st.session_state.get(EDITOR_VERSION_KEY, 0))
     editor_key = f"{EDITOR_WIDGET_PREFIX}{editor_version}"
     for key in list(st.session_state):

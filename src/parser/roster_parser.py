@@ -210,7 +210,7 @@ class CEVRosterParser(BaseRosterParser):
         full_name, position_hint = cls._position_from_prefix(prefix)
         if not full_name:
             full_name = prefix or "Onbekende speler"
-        position = f"OCR controleren: {position_hint}" if position_hint else "OCR controleren"
+        position = f"Controleren - voorstel: {position_hint}" if position_hint else "Controleren"
         return jersey, full_name, position, raw_date, remainder
 
     @staticmethod
@@ -367,8 +367,7 @@ class CEVRosterParser(BaseRosterParser):
                 salvaged_rows += 1
             if salvaged_rows:
                 warnings.append(
-                    f"{country_code}: {salvaged_rows} onzekere OCR-regel(s) als conceptspeler toegevoegd. "
-                    "Controleer de gemarkeerde velden."
+                    f"{country_code}: {salvaged_rows} extra regel(s) toegevoegd die gecontroleerd moeten worden."
                 )
             if expected_rows > matched_rows:
                 warnings.append(
@@ -436,7 +435,7 @@ class GenericRosterParser(BaseRosterParser):
             [],
             [
                 "Er is geen herkenbare spelerslijst gevonden. Mogelijk wijkt de tabelindeling af "
-                "of kon een afbeeldingspagina niet met OCR worden gelezen."
+                "of kon een afbeeldingspagina niet betrouwbaar worden gelezen."
             ],
         )
 

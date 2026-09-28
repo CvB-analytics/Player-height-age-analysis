@@ -109,14 +109,14 @@ TEAM OFFICIALS:"""
     result = CEVRosterParser().parse([page])
 
     assert len(result.players) == 4
-    concepts = [player for player in result.players if player.position_original.startswith("OCR controleren")]
+    concepts = [player for player in result.players if player.position_original.startswith("Controleren")]
     assert len(concepts) == 2
     assert concepts[0].jersey_number == 5
     assert concepts[0].height_cm == 188
     assert concepts[1].jersey_number is None
     assert concepts[1].height_cm == 176
     assert all(player.extraction_status == "Controleren" for player in concepts)
-    assert any("2 onzekere OCR-regel(s)" in warning for warning in result.warnings)
+    assert any("2 extra regel(s)" in warning for warning in result.warnings)
     assert not any(warning.startswith("VOLLEDIGHEIDSCONTROLE: SCN") for warning in result.warnings)
 
 
