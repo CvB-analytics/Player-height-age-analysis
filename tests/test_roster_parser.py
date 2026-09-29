@@ -45,6 +45,42 @@ OFFICIALS"""
     assert result.players[-1].position_normalized == "LIB"
 
 
+def test_fivb_registration_profile_recognizes_id_and_eligibility_columns():
+    page = """Women's Volleyball Nations League 2025
+O-2bis Team registration
+FRA - France
+No FIVB Elig. FoO Shirt Role Last name First name Shirt name Pos. Birthdate Height [cm]
+168983 R l 1 C Cazaute Héléna Cazaute OH 17-Dec-1997 184 305 285 Club
+162899 R l 3 L Giardino Amandine Giardino L 30-Mar-1995 172 275 260 Club
+179014 R l 7 Ndiaye Iman Ndiaye OP 13-Jan-2002 188 315 302 Club
+162903 R l 9 Stojiljkovic Nina Stojiljkovic S 01-Sep-1996 180 285 274 Club
+210294 R l 10 Fanguedou Fatoumata Fanguedou MB 27-Jun-2003 186 309 284 Club
+OFFICIALS"""
+
+    result = FIVBRosterParser().parse([page])
+
+    assert result.profile == "FIVB"
+    assert len(result.players) == 5
+    assert result.teams == [{"country_code": "FRA", "country_name": "France"}]
+    assert [player.jersey_number for player in result.players] == [1, 3, 7, 9, 10]
+    assert [player.height_cm for player in result.players] == [184, 172, 188, 180, 186]
+
+
+def test_fivb_table_columns_are_detected_by_header_name():
+    table = [
+        ["No FIVB", "Elig.", "FoO", "Shirt", "Role", "Last name", "First name", "Shirt name", "Pos.", "Birthdate", "Height\n[cm]"],
+        ["168983", "R", "l", "1", "C", "Cazaute", "Héléna", "Cazaute", "OH", "17-Dec-1997", "184"],
+        ["162899", "R", "l", "3", "L", "Giardino", "Amandine", "Giardino", "L", "30-Mar-1995", "172"],
+    ]
+
+    rows = FIVBRosterParser._rows_from_tables([table])
+
+    assert rows == [
+        (1, "Cazaute", "Héléna", "OH", "17-Dec-1997", 184),
+        (3, "Giardino", "Amandine", "L", "30-Mar-1995", 172),
+    ]
+
+
 def test_recognizes_roster_from_columns_without_exact_legacy_heading():
     page = """
 INTERNATIONAL U18 EVENT

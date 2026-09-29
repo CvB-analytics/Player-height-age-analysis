@@ -67,6 +67,7 @@ def _ocr_image_pages(raw: bytes, extracted_pages: list[str]) -> list[str]:
         try:
             pixmap = page.get_pixmap(dpi=200, colorspace=fitz.csRGB, alpha=False)
             image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+            image = _orient_image_for_ocr(image, page.rotation)
             image = ImageOps.autocontrast(ImageOps.grayscale(image))
             ocr_text = pytesseract.image_to_string(image, lang="eng", config="--psm 6")
             if len(ocr_text.strip()) > len(current.strip()):
@@ -74,6 +75,18 @@ def _ocr_image_pages(raw: bytes, extracted_pages: list[str]) -> list[str]:
         except Exception as exc:
             LOGGER.info("OCR van PDF-pagina %s overgeslagen: %s", index + 1, type(exc).__name__)
     return pages
+
+
+def _orient_image_for_ocr(image, rotation: int):
+    """Undo scan rotation metadata when the rendered content is still sideways."""
+    normalized = int(rotation or 0) % 360
+    if normalized == 90:
+        return image.rotate(90, expand=True)
+    if normalized == 180:
+        return image.rotate(180, expand=True)
+    if normalized == 270:
+        return image.rotate(-90, expand=True)
+    return image
 
 
 def _needs_ocr(text: str) -> bool:

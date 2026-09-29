@@ -35,10 +35,15 @@ OCR_JERSEY_TRANSLATION = str.maketrans({
     "O": "0", "I": "1", "L": "1", "|": "1", "!": "1",
     "Z": "2", "S": "5", "G": "6", "B": "8",
 })
-FIVB_TEAM_RE = re.compile(r"(?mi)^\s*([A-Z]{3})\s+[●•]\s+([^\r\n]+?)\s*$")
+FIVB_TEAM_RE = re.compile(r"(?mi)^\s*([A-Z]{3})\s+[●•\-–—]\s+([^\r\n]+?)\s*$")
 FIVB_DATE = r"\d{1,2}-[A-Za-z]{3}-\d{4}"
 FIVB_PLAYER_RE = re.compile(
     rf"^\s*(\d{{1,2}})\s+(?:C\s+)?(.+?)\s+(OH|OP|MB|S|L)\s+({FIVB_DATE})\s+(\d{{3}})\b",
+    re.IGNORECASE,
+)
+FIVB_REGISTRATION_PLAYER_RE = re.compile(
+    rf"^\s*\d{{4,8}}\s+.*?\s+(\d{{1,2}})\s+(?:[CL]\s+)?(.+?)\s+"
+    rf"(OH|OP|MB|S|L)\s+({FIVB_DATE})\s+(\d{{3}})\b",
     re.IGNORECASE,
 )
 FIVB_POSITION_MAPPING = {
@@ -448,9 +453,9 @@ class FIVBRosterParser(BaseRosterParser):
     def _is_roster_page(page: str) -> bool:
         upper = page.upper()
         return (
-            "TEAM COMPOSITION" in upper
+            ("TEAM COMPOSITION" in upper or "TEAM REGISTRATION" in upper)
             and "BIRTHDATE" in upper
-            and "SHIRT" in upper
+            and ("SHIRT" in upper or "NO FIVB" in upper)
             and bool(FIVB_TEAM_RE.search(page))
         )
 
@@ -497,25 +502,40 @@ class FIVBRosterParser(BaseRosterParser):
     @classmethod
     def _rows_from_tables(cls, tables: list[list[list[Any]]]) -> list[tuple[int, str, str, str, str, int]]:
         for table in tables:
-            header = " ".join(cls._clean_cell(cell) for row in table[:3] for cell in row)
-            if "Birthdate" not in header or "Last name" not in header:
+            header_index: int | None = None
+            columns: dict[str, int] = {}
+            for index, row in enumerate(table[:5]):
+                cells = [cls._clean_cell(cell).casefold() for cell in row]
+                wanted = {
+                    "shirt": next((i for i, value in enumerate(cells) if value.startswith("shirt")), None),
+                    "last": next((i for i, value in enumerate(cells) if "last name" in value), None),
+                    "first": next((i for i, value in enumerate(cells) if "first name" in value), None),
+                    "position": next((i for i, value in enumerate(cells) if value.rstrip(".") == "pos"), None),
+                    "birthdate": next((i for i, value in enumerate(cells) if "birthdate" in value), None),
+                    "height": next((i for i, value in enumerate(cells) if value.startswith("height")), None),
+                }
+                if all(value is not None for value in wanted.values()):
+                    header_index = index
+                    columns = {key: int(value) for key, value in wanted.items() if value is not None}
+                    break
+            if header_index is None:
                 continue
             rows: list[tuple[int, str, str, str, str, int]] = []
-            for row in table[3:]:
-                if len(row) < 7:
+            for row in table[header_index + 1:]:
+                if len(row) <= max(columns.values()):
                     continue
-                jersey_match = re.match(r"^(\d{1,2})\b", cls._clean_cell(row[0]))
-                position = cls._clean_cell(row[4]).upper()
-                raw_date = cls._clean_cell(row[5])
-                height_text = cls._clean_cell(row[6])
+                jersey_match = re.match(r"^(\d{1,2})\b", cls._clean_cell(row[columns["shirt"]]))
+                position = cls._clean_cell(row[columns["position"]]).upper()
+                raw_date = cls._clean_cell(row[columns["birthdate"]])
+                height_text = cls._clean_cell(row[columns["height"]])
                 if not jersey_match or position not in FIVB_POSITION_MAPPING or not re.fullmatch(FIVB_DATE, raw_date):
                     continue
                 if not height_text.isdigit():
                     continue
                 rows.append((
                     int(jersey_match.group(1)),
-                    cls._clean_cell(row[1]),
-                    cls._clean_cell(row[2]),
+                    cls._clean_cell(row[columns["last"]]),
+                    cls._clean_cell(row[columns["first"]]),
                     position,
                     raw_date,
                     int(height_text),
@@ -550,7 +570,8 @@ class FIVBRosterParser(BaseRosterParser):
     def _rows_from_text(cls, page: str) -> list[tuple[int, str, str, str, str, int]]:
         rows: list[tuple[int, str, str, str, str, int]] = []
         for line in page.splitlines():
-            match = FIVB_PLAYER_RE.match(re.sub(r"\s+", " ", line).strip())
+            clean = re.sub(r"\s+", " ", line).strip()
+            match = FIVB_PLAYER_RE.match(clean) or FIVB_REGISTRATION_PLAYER_RE.match(clean)
             if not match:
                 continue
             jersey, prefix, position, raw_date, height = match.groups()
