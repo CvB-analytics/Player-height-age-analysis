@@ -33,3 +33,18 @@ def test_memory_databases_are_isolated_between_sessions():
 
     first_session.close()
     second_session.close()
+
+
+def test_starting_over_can_clear_all_tournaments_in_the_session():
+    database = Database()
+    first_id = database.create_tournament(_tournament("Eerste"))
+    database.create_tournament(_tournament("Tweede"))
+
+    database.clear_tournaments()
+    replacement_id = database.create_tournament(_tournament("Vervanging"))
+
+    assert database.get_tournament(first_id) is None
+    assert [row["name"] for row in database.get_tournaments()] == ["Vervanging"]
+    assert replacement_id > first_id
+
+    database.close()

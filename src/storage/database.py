@@ -129,6 +129,11 @@ class Database:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def clear_tournaments(self) -> None:
+        """Remove the single-use tournament and all dependent session data."""
+        with self.connect() as connection:
+            connection.execute("DELETE FROM tournament")
+
     def get_tournament(self, tournament_id: int) -> dict[str, Any] | None:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM tournament WHERE id = ?", (tournament_id,)).fetchone()

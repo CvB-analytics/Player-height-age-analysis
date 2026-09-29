@@ -8,9 +8,9 @@ from src.storage.database import Database
 from src.ui.import_review import render_import
 from src.ui.reports import render_reports
 from src.ui.results import render_results
-from src.ui.tournament import render_new_tournament, render_tournaments
+from src.ui.tournament import render_new_tournament
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.5.1"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,7 +56,6 @@ def main() -> None:
     )
     pages = {
         "Nieuw toernooi": render_new_tournament,
-        "Toernooien": render_tournaments,
         "Import controleren": render_import,
         "Resultaten": render_results,
         "Rapportage": render_reports,
@@ -68,7 +67,7 @@ def main() -> None:
     st.sidebar.caption(f"Actief: {tournament['name']}" if tournament else "Geen actief toernooi")
     st.sidebar.caption(f"Appversie {APP_VERSION}")
     with st.sidebar.expander("Sessiedata wissen"):
-        st.caption("Verwijdert direct alle toernooien en spelers uit deze browsersessie.")
+        st.caption("Verwijdert direct het tijdelijke toernooi en alle spelers uit deze browsersessie.")
         confirm_clear = st.checkbox("Ik wil alle sessiegegevens wissen.", key="confirm_clear_session")
         if st.button("Alles wissen", disabled=not confirm_clear, use_container_width=True):
             _clear_session()
