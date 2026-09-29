@@ -109,6 +109,18 @@ OFFICIALS"""
     assert any("extra regel(s) uit de scan toegevoegd" in warning for warning in result.warnings)
 
 
+def test_fivb_scan_page_survives_missing_registration_heading():
+    page = """FIVB roster scan
+BUL - Bulgaria
+No FIVB Shirt Last name First name Pos. Birthdate Height
+174474 5 Yordanova Maria Yordanova OH 25-May-2002 184
+142347 6 Paskova Miroslava Paskova OH 16-Feb-1996 181
+142348 8 Barakova Petya Barakova S 18-Jun-1994 180
+OFFICIALS"""
+
+    assert FIVBRosterParser._is_roster_page(page) is True
+
+
 def test_fivb_roster_without_team_header_is_kept_for_review():
     page = """FIVB Volleyball Nations League
 Team registration

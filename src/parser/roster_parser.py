@@ -459,12 +459,15 @@ class FIVBRosterParser(BaseRosterParser):
     @staticmethod
     def _is_roster_page(page: str) -> bool:
         upper = page.upper()
-        return (
-            ("TEAM COMPOSITION" in upper or "TEAM REGISTRATION" in upper)
-            and "BIRTHDATE" in upper
-            and ("SHIRT" in upper or "NO FIVB" in upper)
-            and len(re.findall(FIVB_DATE, page, re.IGNORECASE)) >= 3
-        )
+        dates = len(re.findall(FIVB_DATE, page, re.IGNORECASE))
+        marker_groups = [
+            "TEAM COMPOSITION" in upper or "TEAM REGISTRATION" in upper,
+            "BIRTHDATE" in upper or "BIRTH DATE" in upper,
+            "SHIRT" in upper or "NO FIVB" in upper,
+            "RESERVE PLAYERS" in upper or "OFFICIALS" in upper,
+            "HEIGHT" in upper or "HIGHEST REACH" in upper,
+        ]
+        return dates >= 3 and sum(marker_groups) >= 2
 
     @staticmethod
     def _team_from_page(page: str) -> tuple[str, str] | None:
