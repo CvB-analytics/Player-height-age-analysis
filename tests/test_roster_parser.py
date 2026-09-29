@@ -185,8 +185,8 @@ def _player(
 
 
 def test_shifted_scan_variant_is_merged_with_clean_player_row():
-    damaged = _player(4, "10 Rachkovska Vangeli", "", date(1997, 7, 19), 185, "Controleren")
-    clean = _player(10, "RACHKOVSKA", "Vangeliya", date(1997, 7, 19), 185)
+    damaged = _player(4, "10 Exampleva Alina", "", date(1997, 7, 19), 185, "Controleren")
+    clean = _player(10, "EXAMPLEVA", "Alina", date(1997, 7, 19), 185)
     result = ParseResult("FIVB", "DMY", [damaged, clean], [], [])
 
     reconciled = _reconcile_duplicate_players(result)
@@ -202,6 +202,20 @@ def test_same_birth_date_does_not_merge_different_players():
     reconciled = _reconcile_duplicate_players(result)
 
     assert reconciled.players == [first, second]
+
+
+def test_shifted_rows_are_repaired_even_without_a_clean_duplicate():
+    combined = _player(4, "3 Sampleva Eva", "", date(1996, 1, 2), 190, "Controleren")
+    moved_name = _player(4, "62", "Reserveva Rita", date(1998, 10, 21), 174, "Controleren")
+    compound_first = _player(4, "14 Double Name First", "Second", date(1998, 6, 27), 177, "Controleren")
+    result = ParseResult("FIVB", "DMY", [combined, moved_name, compound_first], [], [])
+
+    reconciled = _reconcile_duplicate_players(result)
+
+    assert [player.jersey_number for player in reconciled.players] == [3, 62, 14]
+    assert (combined.last_name, combined.first_name) == ("Sampleva", "Eva")
+    assert (moved_name.last_name, moved_name.first_name) == ("Reserveva", "Rita")
+    assert (compound_first.last_name, compound_first.first_name) == ("Double Name", "First Second")
 
 
 def test_parse_bulletin_prefers_fivb_when_scan_contains_mixed_markers(monkeypatch):

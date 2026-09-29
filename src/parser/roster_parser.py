@@ -943,6 +943,7 @@ def _reconcile_duplicate_players(result: ParseResult) -> ParseResult:
     date plus name agreement is used as identity evidence; jersey number alone
     is deliberately insufficient because a damaged column can repeat it.
     """
+    result = _repair_shifted_player_rows(result)
     kept: list[ParsedPlayer] = []
     for player in result.players:
         duplicate_index = next(
@@ -960,6 +961,63 @@ def _reconcile_duplicate_players(result: ParseResult) -> ParseResult:
             kept[duplicate_index] = player
     result.players = kept
     return result
+
+
+def _repair_shifted_player_rows(result: ParseResult) -> ParseResult:
+    """Restore a shirt number and name that shifted into adjacent OCR cells."""
+    for player in result.players:
+        raw_last_name = str(player.last_name or "").strip()
+        match = re.match(
+            r"^[^A-Za-z0-9]*(\d{1,2})(?:\s+|[_|.:-]+|$)(.*)$",
+            raw_last_name,
+        )
+        if not match:
+            continue
+        jersey = int(match.group(1))
+        if not 0 < jersey <= 99:
+            continue
+
+        shifted_last = _clean_shifted_name(match.group(2))
+        shifted_last = re.sub(r"^[CL](?:\s+|[_|.:-]+)", "", shifted_last, flags=re.IGNORECASE)
+        current_first = _clean_shifted_name(player.first_name)
+
+        # Sometimes the whole name follows the shirt number in one cell.
+        if shifted_last and not current_first:
+            tokens = shifted_last.split()
+            if len(tokens) >= 2:
+                shifted_last = " ".join(tokens[:-1])
+                current_first = tokens[-1]
+
+        # If both cells contain text but the shifted last-name cell has three
+        # or more words, its final word is usually the first part of a compound
+        # given name (for example "Okumu Oba | Fuyumi Hawi").
+        elif shifted_last and current_first:
+            tokens = shifted_last.split()
+            if len(tokens) >= 3:
+                shifted_last = " ".join(tokens[:-1])
+                current_first = f"{tokens[-1]} {current_first}"
+
+        # In another common shift the last-name cell contains only the shirt
+        # number and the complete name moved into the first-name cell.
+        if not shifted_last and current_first:
+            tokens = current_first.split()
+            if len(tokens) >= 2:
+                shifted_last = " ".join(tokens[:-1])
+                current_first = tokens[-1]
+
+        if not shifted_last:
+            continue
+        player.jersey_number = jersey
+        player.last_name = shifted_last
+        player.first_name = current_first
+        player.full_name_original = f"{shifted_last} {current_first}".strip()
+    return result
+
+
+def _clean_shifted_name(value: str) -> str:
+    text = re.sub(r"[_|]+", " ", str(value or ""))
+    text = re.sub(r"\s+", " ", text)
+    return text.strip(" .:-")
 
 
 def _same_extracted_player(left: ParsedPlayer, right: ParsedPlayer) -> bool:
