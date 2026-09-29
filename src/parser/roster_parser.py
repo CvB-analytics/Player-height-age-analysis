@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -858,6 +859,7 @@ class FIVBRosterParser(BaseRosterParser):
             synthetic_pages.append(self._synthetic_page(team, self._rows_from_page(page)))
         result = self._parse_synthetic(synthetic_pages, forced_date_order)
         result = self._add_salvaged_scan_rows(result, source_pages)
+        result = _reconcile_duplicate_players(result)
         return self._add_fivb_checks(result, source_pages)
 
     def parse_document(
@@ -899,6 +901,7 @@ class FIVBRosterParser(BaseRosterParser):
             item for item in source_pages if not extract_structured_roster_rows(item[1])
         ]
         result = self._add_salvaged_scan_rows(result, unstructured_pages)
+        result = _reconcile_duplicate_players(result)
         return self._add_fivb_checks(result, source_pages)
 
 
@@ -929,7 +932,90 @@ def parse_bulletin(source: bytes | str, forced_date_order: DateOrder | None = No
         result = parser.parse_document(source, pages, forced_date_order)
     else:
         result = parser.parse(pages, forced_date_order)
-    return _add_missing_concept_rows(result)
+    return _add_missing_concept_rows(_reconcile_duplicate_players(result))
+
+
+def _reconcile_duplicate_players(result: ParseResult) -> ParseResult:
+    """Collapse two extraction variants only when they clearly describe one player.
+
+    Multiple reading routes are useful for poor scans, but may produce both a
+    clean row and a shifted row such as ``4 | 10 SURNAME Firstname``.  Birth
+    date plus name agreement is used as identity evidence; jersey number alone
+    is deliberately insufficient because a damaged column can repeat it.
+    """
+    kept: list[ParsedPlayer] = []
+    for player in result.players:
+        duplicate_index = next(
+            (
+                index
+                for index, existing in enumerate(kept)
+                if _same_extracted_player(existing, player)
+            ),
+            None,
+        )
+        if duplicate_index is None:
+            kept.append(player)
+            continue
+        if _player_quality(player) > _player_quality(kept[duplicate_index]):
+            kept[duplicate_index] = player
+    result.players = kept
+    return result
+
+
+def _same_extracted_player(left: ParsedPlayer, right: ParsedPlayer) -> bool:
+    if left.country_code != right.country_code:
+        return False
+    same_parsed_birth = (
+        left.birth_date is not None
+        and right.birth_date is not None
+        and left.birth_date == right.birth_date
+    )
+    same_raw_birth = (
+        bool(left.raw_birth_date.strip())
+        and left.raw_birth_date.strip().casefold() == right.raw_birth_date.strip().casefold()
+    )
+    if not (same_parsed_birth or same_raw_birth):
+        return False
+    if left.height_cm is not None and right.height_cm is not None:
+        if abs(left.height_cm - right.height_cm) > 1:
+            return False
+
+    left_name = _identity_name(left)
+    right_name = _identity_name(right)
+    if not left_name or not right_name:
+        return left.jersey_number is not None and left.jersey_number == right.jersey_number
+    if min(len(left_name), len(right_name)) >= 8 and (
+        left_name in right_name or right_name in left_name
+    ):
+        return True
+    similarity = SequenceMatcher(None, left_name, right_name).ratio()
+    left_tokens, right_tokens = set(left_name.split()), set(right_name.split())
+    overlap = len(left_tokens & right_tokens) / max(1, min(len(left_tokens), len(right_tokens)))
+    return similarity >= 0.72 or overlap >= 0.67
+
+
+def _identity_name(player: ParsedPlayer) -> str:
+    value = f"{player.last_name} {player.first_name}".strip() or player.full_name_original
+    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    value = re.sub(r"\b\d{1,8}\b", " ", value.casefold())
+    value = re.sub(r"[^a-z]+", " ", value)
+    ignored = {"controleren", "speler", "onbekende", "onbekend"}
+    return " ".join(token for token in value.split() if token not in ignored)
+
+
+def _player_quality(player: ParsedPlayer) -> int:
+    score = 0
+    score += 4 if player.jersey_number is not None else 0
+    score += 4 if player.last_name and player.last_name.casefold() != "controleren" else 0
+    score += 5 if player.first_name else 0
+    score += 3 if player.position_normalized not in {"ONB", "ONBEKEND"} else 0
+    score += 2 if player.birth_date is not None else 0
+    score += 2 if player.height_cm is not None else 0
+    score += 3 if player.extraction_status == "OK" else 0
+    combined_name = f"{player.last_name} {player.first_name}"
+    score -= 5 if re.search(r"\d", combined_name) else 0
+    score -= 2 if len(combined_name) > 45 else 0
+    return score
 
 
 def _add_missing_concept_rows(result: ParseResult) -> ParseResult:

@@ -1,11 +1,14 @@
 from collections import Counter
+from datetime import date
 
 import src.parser.roster_parser as roster_parser
 from src.parser.roster_parser import (
     CEVRosterParser,
     FIVBRosterParser,
+    ParsedPlayer,
     ParseResult,
     _add_missing_concept_rows,
+    _reconcile_duplicate_players,
     parse_bulletin,
 )
 
@@ -154,6 +157,51 @@ def test_detected_but_unreadable_rows_become_editable_concepts():
     assert all(player.extraction_status == "Controleren" for player in repaired.players)
     assert not any(warning.startswith("Geen spelersregels gevonden.") for warning in repaired.warnings)
     assert any("10 onzekere conceptregel(s)" in warning for warning in repaired.warnings)
+
+
+def _player(
+    jersey: int,
+    last_name: str,
+    first_name: str,
+    birth_date: date,
+    height: int,
+    status: str = "OK",
+) -> ParsedPlayer:
+    return ParsedPlayer(
+        country_code="BUL",
+        country_name="Bulgaria",
+        jersey_number=jersey,
+        last_name=last_name,
+        first_name=first_name,
+        full_name_original=f"{last_name} {first_name}".strip(),
+        position_original="Outside spiker",
+        position_normalized="PL",
+        raw_birth_date=birth_date.isoformat(),
+        birth_date=birth_date,
+        height_cm=height,
+        extraction_status=status,
+        extraction_warning="" if status == "OK" else "Controleren",
+    )
+
+
+def test_shifted_scan_variant_is_merged_with_clean_player_row():
+    damaged = _player(4, "10 Rachkovska Vangeli", "", date(1997, 7, 19), 185, "Controleren")
+    clean = _player(10, "RACHKOVSKA", "Vangeliya", date(1997, 7, 19), 185)
+    result = ParseResult("FIVB", "DMY", [damaged, clean], [], [])
+
+    reconciled = _reconcile_duplicate_players(result)
+
+    assert reconciled.players == [clean]
+
+
+def test_same_birth_date_does_not_merge_different_players():
+    first = _player(7, "ALPHA", "Anna", date(2005, 6, 10), 180)
+    second = _player(12, "BETA", "Bea", date(2005, 6, 10), 180)
+    result = ParseResult("FIVB", "DMY", [first, second], [], [])
+
+    reconciled = _reconcile_duplicate_players(result)
+
+    assert reconciled.players == [first, second]
 
 
 def test_parse_bulletin_prefers_fivb_when_scan_contains_mixed_markers(monkeypatch):

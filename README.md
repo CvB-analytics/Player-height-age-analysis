@@ -42,6 +42,7 @@ Download de gewenste rapporten voordat u de browser sluit. De app heeft bewust g
 - FIVB Team composition- en Team registration-tabellen, inclusief korte positiecodes en reserve players.
 - Scanpagina's worden eerst rechtgezet en het dominante tabelraster wordt afzonderlijk herkend en verwijderd.
 - De inhoud wordt daarna per benoemde kolom gelezen. ID-, selectie- en clubkolommen kunnen daardoor niet meer ongemerkt in rugnummer, naam of geboortedatum terechtkomen.
+- Meerdere leesvarianten van dezelfde speler worden op team, geboortedatum en naamovereenkomst samengevoegd; de volledigste rij blijft behouden.
 - De keuze tussen bulletinprofielen gebeurt op basis van herkenningsscores; de volgorde van CEV en FIVB in de code bepaalt de uitkomst niet meer.
 - Detectie van datumvolgorde op documentniveau, met verplichte keuze bij twijfel.
 - Positienormalisatie, validatie, tijdelijke sessieverwerking, ranking, correlaties, Excel-export en A4-PDF-export.
