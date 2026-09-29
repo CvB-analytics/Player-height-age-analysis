@@ -6,11 +6,12 @@ import streamlit as st
 
 from src.storage.database import Database
 from src.ui.import_review import render_import
+from src.ui.navigation import NAVIGATION_KEY, apply_pending_navigation
 from src.ui.reports import render_reports
 from src.ui.results import render_results
 from src.ui.tournament import render_new_tournament
 
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.6.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,7 +61,8 @@ def main() -> None:
         "Resultaten": render_results,
         "Rapportage": render_reports,
     }
-    selected = st.sidebar.radio("Navigatie", list(pages))
+    apply_pending_navigation(list(pages))
+    selected = st.sidebar.radio("Navigatie", list(pages), key=NAVIGATION_KEY)
     tournament_id = st.session_state.get("tournament_id")
     tournament = db.get_tournament(tournament_id) if tournament_id else None
     st.sidebar.divider()

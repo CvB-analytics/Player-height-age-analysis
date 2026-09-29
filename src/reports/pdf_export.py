@@ -124,6 +124,48 @@ def _tables(c: canvas.Canvas, report: dict[str, Any], width: float, height: floa
     note = "Negatief: een hogere waarde hangt samen met een betere (lagere) ranking. Geen oorzakelijk verband."
     _draw_wrapped(c, note, 620, y + 3, 190, 8)
 
+    position_bottom = height - 151 - (len(position_rows) + 1) * 15
+    birth_top = min(height - 254, position_bottom - 10)
+    birth_bottom = chart_y + chart_height + 8
+    _draw_birth_year_table(c, report["birth_years"], 402, birth_top, 410, birth_bottom)
+
+
+def _draw_birth_year_table(
+    c: canvas.Canvas,
+    birth_years: dict[int, int],
+    x: float,
+    top: float,
+    width: float,
+    bottom: float,
+) -> None:
+    items = sorted((int(year), int(count)) for year, count in birth_years.items())
+    if not items or top <= bottom + 24:
+        return
+    c.setFillColor(NAVY)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(x, top, "Aantal spelers per geboortejaar")
+
+    table_top = top - 8
+    row_height = 11
+    rows_per_block = max(1, int((table_top - bottom) // row_height) - 1)
+    block_count = max(1, ceil(len(items) / rows_per_block))
+    block_width = width / block_count
+    year_width = block_width * 0.62
+    count_width = block_width - year_width
+    for block_index in range(block_count):
+        block_rows = items[block_index * rows_per_block : (block_index + 1) * rows_per_block]
+        block_x = x + block_index * block_width
+        _draw_table(
+            c,
+            block_x,
+            table_top,
+            ["Jaar", "#"],
+            block_rows,
+            [year_width, count_width],
+            row_height,
+            6.5,
+        )
+
 
 def _draw_table(c, x, top, headers, rows, widths, row_height, font_size=7) -> None:
     total_width = sum(widths)

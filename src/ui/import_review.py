@@ -11,6 +11,7 @@ from src.parser.date_parser import parse_date
 from src.parser.pdf_reader import NoUsableTextError
 from src.parser.roster_parser import parse_bulletin
 from src.storage.database import Database
+from src.ui.navigation import queue_navigation
 from src.validation.import_validator import validate_import
 
 EDITOR_COLUMNS = {
@@ -157,7 +158,7 @@ def render_import(db: Database) -> None:
         db.update_tournament_source(tournament_id, st.session_state.get("import_filename", ""))
         for key in ("import_result", "import_pdf_bytes", "import_filename", "import_date_order", "import_profile", "import_date_choice", "parser_warnings", "confirm_import_completeness", EDITOR_STATE_KEY, EDITOR_VERSION_KEY):
             st.session_state.pop(key, None)
-        st.success("De import is goedgekeurd en tijdelijk in deze sessie beschikbaar.")
+        queue_navigation("Resultaten")
         st.rerun()
 
 

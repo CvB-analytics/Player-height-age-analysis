@@ -72,4 +72,7 @@ def render_reports(db: Database) -> None:
         "A4-PDF downloaden", data=pdf, file_name=f"{safe_name or 'toernooi'}_overzicht.pdf",
         mime="application/pdf", use_container_width=True,
     )
-    st.caption("Excel bevat één gecombineerd, afdrukbaar A4-overzicht plus de tabbladen Spelers en Resultaten. De PDF bevat hetzelfde coachoverzicht op één pagina.")
+    st.caption(
+        "Excel bevat één gecombineerd, afdrukbaar overzicht plus de tabbladen Spelers en Resultaten. "
+        "De PDF bevat hetzelfde coachoverzicht, inclusief het aantal spelers per geboortejaar, op één pagina."
+    )

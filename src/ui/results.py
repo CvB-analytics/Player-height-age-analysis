@@ -5,10 +5,13 @@ import streamlit as st
 
 from src.reports.calculations import build_report_data
 from src.storage.database import Database
+from src.ui.navigation import queue_navigation
 
 
 def render_results(db: Database) -> None:
     st.header("Resultaten / ranking")
+    if st.session_state.pop("ranking_saved_partial", False):
+        st.success("De ingevulde rankings zijn opgeslagen. Vul de resterende rankings in om door te gaan.")
     tournament_id = st.session_state.get("tournament_id")
     tournament = db.get_tournament(tournament_id) if tournament_id else None
     if not tournament:
@@ -38,7 +41,10 @@ def render_results(db: Database) -> None:
         else:
             rankings = {int(row["team_id"]): (int(row["Eindranking"]) if pd.notna(row["Eindranking"]) else None) for _, row in edited.iterrows()}
             db.save_ranking(tournament_id, rankings)
-            st.success("De ranking is in deze sessie bijgewerkt.")
+            if len(values) == len(teams):
+                queue_navigation("Rapportage")
+            else:
+                st.session_state["ranking_saved_partial"] = True
             st.rerun()
 
     report = build_report_data(tournament, teams, players)

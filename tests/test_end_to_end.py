@@ -47,6 +47,7 @@ def test_pdf_database_report_roundtrip(tmp_path, synthetic_bulletin):
     assert all(chart.dLbls.showSerName is False for chart in charts)
     assert all(chart.dLbls.showCatName is False for chart in charts)
     assert all(chart.dLbls.numFmt == "0" for chart in charts)
+    assert all(chart.layout.manualLayout.h == 0.7 for chart in charts)
     height_chart = charts[0]
     assert height_chart.x_axis.title.tx.rich.p[0].r[0].t == "Land"
     assert height_chart.y_axis.title.tx.rich.p[0].r[0].t == "Lengte (cm)"
@@ -80,7 +81,11 @@ def test_sixteen_team_exports_do_not_overlap_tables_and_charts():
             {"position": code, "players": 40, "avg_height": 181.0, "avg_age": 16.5}
             for code in ("DIA", "LIB", "MB", "PL", "SV")
         ],
-        "birth_years": {2007: 120, 2008: 85, 2009: 17, 2010: 2},
+        "birth_years": {
+            1993: 3, 1994: 4, 1995: 4, 1996: 2, 1997: 10, 1998: 11,
+            1999: 12, 2000: 13, 2001: 14, 2002: 15, 2003: 16, 2004: 17,
+            2005: 18, 2006: 19, 2007: 20, 2008: 21, 2009: 12, 2010: 3,
+        },
         "quarters": {"Q1": 75, "Q2": 63, "Q3": 43, "Q4": 43},
         "correlations": {"ranking_height": -0.501, "ranking_age": 0.290},
         "results": [
@@ -95,8 +100,12 @@ def test_sixteen_team_exports_do_not_overlap_tables_and_charts():
     overview = workbook["Overzicht"]
     country_end = overview.tables["LandenTabel"].ref.split(":")[1]
     year_start = overview.tables["JarenTabel"].ref.split(":")[0]
+    year_end = overview.tables["JarenTabel"].ref.split(":")[1]
     assert int("".join(filter(str.isdigit, year_start))) > int("".join(filter(str.isdigit, country_end)))
-    assert all(chart.anchor._from.row + 1 >= 34 for chart in overview._charts)
+    assert all(
+        chart.anchor._from.row + 1 > int("".join(filter(str.isdigit, year_end)))
+        for chart in overview._charts
+    )
     assert overview.page_setup.fitToWidth == 1
     assert overview.page_setup.fitToHeight == 2
 
@@ -104,3 +113,6 @@ def test_sixteen_team_exports_do_not_overlap_tables_and_charts():
     with pdfplumber.open(BytesIO(pdf_bytes)) as document:
         text = document.pages[0].extract_text() or ""
     assert all(code in text for code in codes)
+    assert "Aantal spelers per geboortejaar" in text
+    assert "1993" in text
+    assert "2010" in text

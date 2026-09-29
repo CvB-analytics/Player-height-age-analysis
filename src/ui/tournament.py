@@ -5,13 +5,11 @@ from datetime import date
 import streamlit as st
 
 from src.storage.database import Database
+from src.ui.navigation import queue_navigation
 
 
 def render_new_tournament(db: Database) -> None:
     st.header("Nieuw toernooi")
-    created_name = st.session_state.pop("new_tournament_created", None)
-    if created_name:
-        st.success(f"{created_name} is aangemaakt. Ga nu naar 'Import controleren'.")
     st.caption(
         "Per browsersessie wordt één tijdelijk toernooi gebruikt. "
         "Een nieuw toernooi vervangt alle gegevens van het huidige toernooi."
@@ -38,5 +36,5 @@ def render_new_tournament(db: Database) -> None:
             if key != "database":
                 st.session_state.pop(key, None)
         st.session_state["tournament_id"] = tournament_id
-        st.session_state["new_tournament_created"] = name.strip()
+        queue_navigation("Import controleren")
         st.rerun()

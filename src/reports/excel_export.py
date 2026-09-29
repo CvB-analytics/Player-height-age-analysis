@@ -7,6 +7,7 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.layout import Layout, ManualLayout
 from openpyxl.chart.marker import DataPoint
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -83,7 +84,8 @@ def _overview(ws, report: dict[str, Any]) -> None:
     country_end = country_start + len(country_rows)
     compact_layout = len(country_rows) <= 7
     year_start = 18 if compact_layout else country_end + 2
-    _write_table(ws, year_start, 1, ["Geboortejaar", "# spelers"], [[year, count] for year, count in report["birth_years"].items()], "JarenTabel")
+    birth_year_rows = [[year, count] for year, count in report["birth_years"].items()]
+    _write_table(ws, year_start, 1, ["Geboortejaar", "# spelers"], birth_year_rows, "JarenTabel")
     quarter_start = year_start
     _write_table(ws, quarter_start, 4, ["Kwartaal", "# spelers"], [[q, report["quarters"][q]] for q in ("Q1", "Q2", "Q3", "Q4")], "KwartalenTabel")
 
@@ -106,6 +108,14 @@ def _overview(ws, report: dict[str, Any]) -> None:
     ws["K21"].font = Font(size=9, italic=True, color="52606D")
     ws["K21"].alignment = Alignment(wrap_text=True, vertical="top")
 
+    detail_end = max(
+        country_end,
+        year_start + max(1, len(birth_year_rows)),
+        quarter_start + 4,
+        22,
+    )
+    chart_start = detail_end + 2
+
     if report["countries"]:
         chart = _column_chart("Gem. lengte netspelers per land", "Land", "Lengte (cm)")
         chart.add_data(Reference(ws, min_col=5, min_row=country_start, max_row=country_start + len(report["countries"])), titles_from_data=True)
@@ -116,7 +126,6 @@ def _overview(ws, report: dict[str, Any]) -> None:
             chart.y_axis.scaling.max = ceil(max(heights) / 2) * 2 + 2
             chart.y_axis.majorUnit = 2
         _color_points(chart, len(report["countries"]))
-        chart_start = 24 if compact_layout else year_start + max(len(report["birth_years"]), 4) + 2
         if not compact_layout:
             chart.height = 7.2
         ws.add_chart(chart, f"H{chart_start}")
@@ -127,7 +136,6 @@ def _overview(ws, report: dict[str, Any]) -> None:
     quarter_chart.y_axis.scaling.min = 0
     quarter_chart.y_axis.scaling.max = ceil(max(report["quarters"].values()) / 5) * 5 + 5
     _color_points(quarter_chart, 4)
-    chart_start = 24 if compact_layout else year_start + max(len(report["birth_years"]), 4) + 2
     if not compact_layout:
         quarter_chart.height = 7.2
     ws.add_chart(quarter_chart, f"A{chart_start}")
@@ -138,12 +146,12 @@ def _overview(ws, report: dict[str, Any]) -> None:
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
     ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1 if compact_layout else 2
+    print_end = chart_start + 15
+    ws.page_setup.fitToHeight = 1 if print_end <= 42 else 2
     ws.page_margins.left = 0.25
     ws.page_margins.right = 0.25
     ws.page_margins.top = 0.3
     ws.page_margins.bottom = 0.3
-    print_end = 39 if compact_layout else chart_start + 15
     ws.print_area = f"A1:N{print_end}"
     ws.oddFooter.center.text = "Lokaal gegenereerd toernooioverzicht"
     ws.sheet_properties.tabColor = NAVY
@@ -169,6 +177,18 @@ def _column_chart(title: str, x_title: str, y_title: str) -> BarChart:
     chart.dLbls.showPercent = False
     chart.dLbls.numFmt = "0"
     chart.dLbls.dLblPos = "outEnd"
+    chart.layout = Layout(
+        manualLayout=ManualLayout(
+            x=0.08,
+            y=0.08,
+            w=0.84,
+            h=0.70,
+            xMode="factor",
+            yMode="factor",
+            wMode="factor",
+            hMode="factor",
+        )
+    )
     return chart
 
 

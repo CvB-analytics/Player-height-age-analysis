@@ -21,22 +21,22 @@ Voor deze eenmalige installatie zijn de Python-pakketten uit `requirements.txt` 
 
 ## Eenvoudige werkwijze
 
-1. Kies **Nieuw toernooi** en vul minimaal naam, categorie, locatie en startdatum in.
-2. Kies **Import controleren**, selecteer het PDF-bulletin en klik **PDF verwerken**.
+1. Kies **Nieuw toernooi** en vul minimaal naam, categorie, locatie en startdatum in. De app gaat daarna automatisch naar **Import controleren**.
+2. Selecteer het PDF-bulletin en klik **PDF verwerken**.
 3. Controleer alle waarschuwingen en corrigeer de tabel. Datums gebruikt u als `JJJJ-MM-DD`.
-4. Klik **Import goedkeuren en gebruiken**. De app verwerkt de import pas wanneer er geen bekende waarschuwingen meer zijn.
-5. Vul later onder **Resultaten** de eindranking in.
-6. Download onder **Rapportage** het Excelbestand en/of het compacte A4-PDF-overzicht.
+4. Klik **Import goedkeuren en gebruiken**. De app verwerkt de import pas wanneer er geen bekende waarschuwingen meer zijn en opent daarna **Resultaten**.
+5. Vul daar de eindranking in.
+6. Na een volledig ingevulde ranking opent **Rapportage** automatisch. Download daar het Excelbestand en/of het compacte A4-PDF-overzicht.
 
 Het Excelrapport bevat drie tabbladen:
 
-- **Overzicht**: alle kerncijfers, landen, posities, rankinganalyse en twee gekleurde staafdiagrammen op één liggende A4.
+- **Overzicht**: alle kerncijfers, landen, posities, rankinganalyse en twee gekleurde staafdiagrammen. Bij veel teams of geboortejaren groeit dit overzicht automatisch door naar een tweede afdrukpagina.
 - **Spelers**: de volledige spelerslijst.
 - **Resultaten**: eindranking en correlatieanalyse.
 
 Download de gewenste rapporten voordat u de browser sluit. De app heeft bewust geen database of back-upfunctie. Via **Sessiedata wissen** kan de volledige tijdelijke werksessie direct worden verwijderd.
 
-## Ondersteund in versie 0.1
+## Ondersteund in versie 0.6
 
 - Tekstgebaseerde en afbeeldingsgebaseerde CEV/WEVZA-rosters met herkenbare kolommen voor speler, positie, geboortedatum en lengte.
 - FIVB Team composition- en Team registration-tabellen, inclusief korte positiecodes en reserve players.
