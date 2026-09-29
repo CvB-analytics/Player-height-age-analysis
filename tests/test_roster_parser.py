@@ -81,6 +81,22 @@ def test_fivb_table_columns_are_detected_by_header_name():
     ]
 
 
+def test_fivb_roster_without_team_header_is_kept_for_review():
+    page = """FIVB Volleyball Nations League
+Team registration
+No FIVB Elig. FoO Shirt Role Last name First name Shirt name Pos. Birthdate Height [cm]
+168983 R l 1 C Cazaute Héléna Cazaute OH 17-Dec-1997 184 305 285 Club
+162899 R l 3 L Giardino Amandine Giardino L 30-Mar-1995 172 275 260 Club
+179014 R l 7 Ndiaye Iman Ndiaye OP 13-Jan-2002 188 315 302 Club
+OFFICIALS"""
+
+    result = FIVBRosterParser().parse([page])
+
+    assert len(result.players) == 3
+    assert {player.country_code for player in result.players} == {"PAA"}
+    assert any("tijdelijke code PAA" in warning for warning in result.warnings)
+
+
 def test_recognizes_roster_from_columns_without_exact_legacy_heading():
     page = """
 INTERNATIONAL U18 EVENT

@@ -456,7 +456,7 @@ class FIVBRosterParser(BaseRosterParser):
             ("TEAM COMPOSITION" in upper or "TEAM REGISTRATION" in upper)
             and "BIRTHDATE" in upper
             and ("SHIRT" in upper or "NO FIVB" in upper)
-            and bool(FIVB_TEAM_RE.search(page))
+            and len(re.findall(FIVB_DATE, page, re.IGNORECASE)) >= 3
         )
 
     @staticmethod
@@ -588,15 +588,46 @@ class FIVBRosterParser(BaseRosterParser):
         result.profile = self.name
         return result
 
+    @staticmethod
+    def _temporary_team(page_number: int) -> tuple[str, str]:
+        offset = max(0, page_number - 1)
+        code = f"P{chr(ord('A') + (offset // 26) % 26)}{chr(ord('A') + offset % 26)}"
+        return f"Onbekend team pagina {page_number}", code
+
+    @classmethod
+    def _add_fivb_checks(
+        cls,
+        result: ParseResult,
+        source_pages: list[tuple[int, str, tuple[str, str], bool]],
+    ) -> ParseResult:
+        counts = Counter(player.country_code for player in result.players)
+        for page_number, page, (_, country_code), temporary in source_pages:
+            if temporary:
+                result.warnings.append(
+                    f"VOLLEDIGHEIDSCONTROLE: De teamkop op pagina {page_number} was niet herkenbaar. "
+                    f"De spelers zijn opgenomen onder tijdelijke code {country_code}; corrigeer teamnaam en code."
+                )
+            player_section = re.split(r"\bOFFICIALS\b", page, maxsplit=1, flags=re.IGNORECASE)[0]
+            expected = len(re.findall(FIVB_DATE, player_section, re.IGNORECASE))
+            if expected > counts[country_code]:
+                result.warnings.append(
+                    f"VOLLEDIGHEIDSCONTROLE: {country_code} bevat circa {expected} spelersregels, "
+                    f"maar er zijn er {counts[country_code]} herkend. Controleer en vul ontbrekende spelers aan."
+                )
+        return result
+
     def parse(self, pages: list[str], forced_date_order: DateOrder | None = None) -> ParseResult:
         synthetic_pages = []
-        for page in pages:
+        source_pages: list[tuple[int, str, tuple[str, str], bool]] = []
+        for index, page in enumerate(pages, start=1):
             if not self._is_roster_page(page):
                 continue
-            team = self._team_from_page(page)
-            if team:
-                synthetic_pages.append(self._synthetic_page(team, self._rows_from_text(page)))
-        return self._parse_synthetic(synthetic_pages, forced_date_order)
+            detected_team = self._team_from_page(page)
+            team = detected_team or self._temporary_team(index)
+            source_pages.append((index, page, team, detected_team is None))
+            synthetic_pages.append(self._synthetic_page(team, self._rows_from_text(page)))
+        result = self._parse_synthetic(synthetic_pages, forced_date_order)
+        return self._add_fivb_checks(result, source_pages)
 
     def parse_document(
         self,
@@ -606,12 +637,16 @@ class FIVBRosterParser(BaseRosterParser):
     ) -> ParseResult:
         """Use PDF table geometry when available and fall back to extracted text per page."""
         fallback_by_page: dict[int, str] = {}
+        source_pages: list[tuple[int, str, tuple[str, str], bool]] = []
+        teams_by_page: dict[int, tuple[str, str]] = {}
         for index, page in enumerate(pages):
             if not self._is_roster_page(page):
                 continue
-            team = self._team_from_page(page)
-            if team:
-                fallback_by_page[index] = self._synthetic_page(team, self._rows_from_text(page))
+            detected_team = self._team_from_page(page)
+            team = detected_team or self._temporary_team(index + 1)
+            teams_by_page[index] = team
+            source_pages.append((index + 1, page, team, detected_team is None))
+            fallback_by_page[index] = self._synthetic_page(team, self._rows_from_text(page))
 
         structured_by_page: dict[int, str] = {}
         raw = source if isinstance(source, bytes) else Path(source).read_bytes()
@@ -620,15 +655,16 @@ class FIVBRosterParser(BaseRosterParser):
 
             with pdfplumber.open(BytesIO(raw)) as pdf:
                 for index in fallback_by_page:
-                    team = self._team_from_page(pages[index])
+                    team = teams_by_page[index]
                     rows = self._rows_from_tables(pdf.pages[index].extract_tables())
-                    if team and rows:
+                    if rows:
                         structured_by_page[index] = self._synthetic_page(team, rows)
         except Exception:
             structured_by_page = {}
 
         merged = [structured_by_page.get(index, page) for index, page in fallback_by_page.items()]
-        return self._parse_synthetic(merged, forced_date_order)
+        result = self._parse_synthetic(merged, forced_date_order)
+        return self._add_fivb_checks(result, source_pages)
 
 
 class GenericRosterParser(BaseRosterParser):
