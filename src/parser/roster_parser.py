@@ -53,6 +53,13 @@ FIVB_POSITION_MAPPING = {
     "MB": "Middle blocker",
     "L": "Libero",
 }
+FIVB_OCR_POSITION_MAPPING = {
+    "OH": "OH", "0H": "OH", "OI": "OH",
+    "OP": "OP", "0P": "OP",
+    "MB": "MB", "M8": "MB",
+    "S": "S", "5": "S",
+    "L": "L", "I": "L",
+}
 
 
 @dataclass
@@ -584,6 +591,125 @@ class FIVBRosterParser(BaseRosterParser):
             rows.append((int(jersey), last_name, first_name, position.upper(), raw_date, int(height)))
         return rows
 
+    @classmethod
+    def _salvage_scan_line(
+        cls, line: str
+    ) -> tuple[int | None, str, str, str, str, int | None] | None:
+        """Recover a reviewable FIVB row when OCR damaged its column structure."""
+        date_match = re.search(FIVB_DATE, line, re.IGNORECASE)
+        if not date_match:
+            return None
+        prefix = re.sub(r"\s+", " ", line[:date_match.start()]).strip()
+        suffix = line[date_match.end():]
+        raw_date = date_match.group(0)
+        height = next(
+            (int(value) for value in re.findall(r"(?<!\d)(\d{3})(?!\d)", suffix) if 140 <= int(value) <= 215),
+            None,
+        )
+
+        tokens = prefix.split()
+        jersey_index = next(
+            (
+                index
+                for index, token in enumerate(tokens)
+                if re.fullmatch(r"\d{1,2}", token) and 0 < int(token) <= 99
+            ),
+            None,
+        )
+        jersey = int(tokens[jersey_index]) if jersey_index is not None else None
+        name_start = jersey_index + 1 if jersey_index is not None else 0
+        if name_start < len(tokens) and tokens[name_start].upper() in {"C", "L"}:
+            name_start += 1
+
+        position_index: int | None = None
+        position = ""
+        for index in range(len(tokens) - 1, name_start - 1, -1):
+            cleaned = re.sub(r"[^A-Z0-9]", "", tokens[index].upper())
+            mapped = FIVB_OCR_POSITION_MAPPING.get(cleaned)
+            if mapped:
+                position_index = index
+                position = mapped
+                break
+        name_tokens = tokens[name_start:position_index] if position_index is not None else tokens[name_start:]
+        while name_tokens and re.fullmatch(r"\d{4,8}|[✓✔☑□|]", name_tokens[0]):
+            name_tokens.pop(0)
+        full_name = " ".join(name_tokens).strip() or "Onbekende speler"
+        last_name, first_name = cls._split_text_name(full_name)
+        return jersey, last_name, first_name, position, raw_date, height
+
+    @classmethod
+    def _add_salvaged_scan_rows(
+        cls,
+        result: ParseResult,
+        source_pages: list[tuple[int, str, tuple[str, str], bool]],
+    ) -> ParseResult:
+        existing = {
+            (
+                player.country_code,
+                player.jersey_number,
+                player.birth_date.isoformat() if player.birth_date else player.raw_birth_date.casefold(),
+            )
+            for player in result.players
+        }
+        teams = {(team["country_code"], team["country_name"]) for team in result.teams}
+        added_by_country: Counter[str] = Counter()
+        seen_lines: set[tuple[str, int | None, str, str]] = set()
+        for _, page, (country_name, country_code), _ in source_pages:
+            teams.add((country_code, country_name))
+            player_section = re.split(r"\bOFFICIALS\b", page, maxsplit=1, flags=re.IGNORECASE)[0]
+            for line in player_section.splitlines():
+                salvaged = cls._salvage_scan_line(line)
+                if not salvaged:
+                    continue
+                jersey, last_name, first_name, position, raw_date, height = salvaged
+                numeric_date = cls._numeric_date(raw_date)
+                birth_date = parse_date(numeric_date, "DMY") if numeric_date else None
+                date_key = birth_date.isoformat() if birth_date else raw_date.casefold()
+                identity = (country_code, jersey, date_key)
+                line_key = (country_code, jersey, date_key, f"{last_name} {first_name}".casefold())
+                if identity in existing or line_key in seen_lines:
+                    continue
+                seen_lines.add(line_key)
+                existing.add(identity)
+                position_original = FIVB_POSITION_MAPPING.get(position, "Controleren")
+                normalized, _ = normalize_position(position_original)
+                row_warnings = ["Regel automatisch uit de scan toegevoegd; controleer de gegevens."]
+                if jersey is None:
+                    row_warnings.append("Rugnummer ontbreekt.")
+                if not position:
+                    row_warnings.append("Positie ontbreekt.")
+                if height is None:
+                    row_warnings.append("Lengte ontbreekt.")
+                result.players.append(
+                    ParsedPlayer(
+                        country_code=country_code,
+                        country_name=country_name,
+                        jersey_number=jersey,
+                        last_name=last_name,
+                        first_name=first_name,
+                        full_name_original=f"{last_name} {first_name}".strip(),
+                        position_original=position_original,
+                        position_normalized=normalized,
+                        raw_birth_date=numeric_date or raw_date,
+                        birth_date=birth_date,
+                        height_cm=height,
+                        extraction_status="Controleren",
+                        extraction_warning="; ".join(row_warnings),
+                    )
+                )
+                added_by_country[country_code] += 1
+        result.teams = [
+            {"country_code": code, "country_name": name}
+            for code, name in sorted(teams)
+        ]
+        if added_by_country:
+            result.date_order = "DMY"
+        for country_code, count in sorted(added_by_country.items()):
+            result.warnings.append(
+                f"{country_code}: {count} extra regel(s) uit de scan toegevoegd die gecontroleerd moeten worden."
+            )
+        return result
+
     def _parse_synthetic(
         self,
         synthetic_pages: list[str],
@@ -632,6 +758,7 @@ class FIVBRosterParser(BaseRosterParser):
             source_pages.append((index, page, team, detected_team is None))
             synthetic_pages.append(self._synthetic_page(team, self._rows_from_text(page)))
         result = self._parse_synthetic(synthetic_pages, forced_date_order)
+        result = self._add_salvaged_scan_rows(result, source_pages)
         return self._add_fivb_checks(result, source_pages)
 
     def parse_document(
@@ -669,6 +796,7 @@ class FIVBRosterParser(BaseRosterParser):
 
         merged = [structured_by_page.get(index, page) for index, page in fallback_by_page.items()]
         result = self._parse_synthetic(merged, forced_date_order)
+        result = self._add_salvaged_scan_rows(result, source_pages)
         return self._add_fivb_checks(result, source_pages)
 
 

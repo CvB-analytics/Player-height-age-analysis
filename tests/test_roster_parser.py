@@ -90,6 +90,25 @@ def test_fivb_geometric_and_logical_ocr_rows_are_deduplicated():
     assert rows == [(5, "Yordanova", "Maria", "OH", "25-May-2002", 184)]
 
 
+def test_fivb_damaged_scan_rows_are_added_for_review():
+    page = """Volleyball Nations League 2024
+O-2bis Team registration
+BUL - Bulgaria
+No FIVB Elig. Shirt Role Last name First name Shirt name Pos. Birthdate Height [cm]
+174474 check 5 Yordanova Maria Yordanova 0H 25-May-2002 184 295 283 Club
+142347 check 6 Paskova Miroslava Paskova 0H 16-Feb-1996 181 299 280 Club
+142348 check 8 Barakova Petya Barakova S 18-Jun-1994 180 299 271 Club
+OFFICIALS"""
+
+    result = FIVBRosterParser().parse([page])
+
+    assert len(result.players) == 3
+    assert [player.jersey_number for player in result.players] == [8, 5, 6]
+    assert {player.position_normalized for player in result.players} == {"SV", "PL"}
+    assert all(player.extraction_status == "Controleren" for player in result.players if player.jersey_number in {5, 6})
+    assert any("extra regel(s) uit de scan toegevoegd" in warning for warning in result.warnings)
+
+
 def test_fivb_roster_without_team_header_is_kept_for_review():
     page = """FIVB Volleyball Nations League
 Team registration
