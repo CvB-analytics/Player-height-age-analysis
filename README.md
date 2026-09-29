@@ -36,12 +36,13 @@ Het Excelrapport bevat drie tabbladen:
 
 Download de gewenste rapporten voordat u de browser sluit. De app heeft bewust geen database of back-upfunctie. Via **Sessiedata wissen** kan de volledige tijdelijke werksessie direct worden verwijderd.
 
-## Ondersteund in versie 0.6
+## Ondersteund in versie 0.7
 
 - Tekstgebaseerde en afbeeldingsgebaseerde CEV/WEVZA-rosters met herkenbare kolommen voor speler, positie, geboortedatum en lengte.
 - FIVB Team composition- en Team registration-tabellen, inclusief korte positiecodes en reserve players.
-- Dichte scans worden ook op basis van de visuele woordposities tot tabelrijen opgebouwd, zodat los gelezen kolommen weer aan dezelfde speler worden gekoppeld.
-- Automatische correctie van gedraaide scanpagina's voordat de spelersregels worden gelezen.
+- Scanpagina's worden eerst rechtgezet en het dominante tabelraster wordt afzonderlijk herkend en verwijderd.
+- De inhoud wordt daarna per benoemde kolom gelezen. ID-, selectie- en clubkolommen kunnen daardoor niet meer ongemerkt in rugnummer, naam of geboortedatum terechtkomen.
+- De keuze tussen bulletinprofielen gebeurt op basis van herkenningsscores; de volgorde van CEV en FIVB in de code bepaalt de uitkomst niet meer.
 - Detectie van datumvolgorde op documentniveau, met verplichte keuze bij twijfel.
 - Positienormalisatie, validatie, tijdelijke sessieverwerking, ranking, correlaties, Excel-export en A4-PDF-export.
 - Een later uitbreidbaar `match`-datamodel; wedstrijdanalyse is nog niet aanwezig.

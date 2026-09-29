@@ -6,6 +6,14 @@ import logging
 from statistics import median
 from typing import Any
 
+from .ocr_table import (
+    deskew_table_image,
+    detect_grid_table,
+    remove_grid_lines,
+    serialize_grid_rows,
+    words_to_grid_rows,
+)
+
 LOGGER = logging.getLogger(__name__)
 OCR_DPI = 240
 
@@ -72,15 +80,38 @@ def _ocr_image_pages(raw: bytes, extracted_pages: list[str]) -> list[str]:
             image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
             image = _orient_image_for_ocr(image, page.rotation)
             image = ImageOps.autocontrast(ImageOps.grayscale(image))
+            image, _ = deskew_table_image(image)
+            grid = detect_grid_table(image)
+            ocr_image = remove_grid_lines(image, grid, margin=3) if grid else image
             data = pytesseract.image_to_data(
-                image,
+                ocr_image,
                 lang="eng",
                 config="--psm 6 -c preserve_interword_spaces=1",
                 output_type=pytesseract.Output.DICT,
             )
             logical_text = _logical_text_from_ocr_data(data)
             geometric_text = _geometric_rows_from_ocr_data(data, image.height)
-            ocr_text = "\n".join(part for part in (logical_text, geometric_text) if part)
+            grid_text = ""
+            if grid:
+                # A second, sparse-text pass is deliberately limited to the
+                # detected table.  It reads individual cells much more cleanly
+                # than asking one OCR pass to understand the complete page.
+                left, right = grid.x_lines[0], grid.x_lines[-1]
+                top, bottom = grid.y_lines[0], grid.y_lines[-1]
+                table_crop = ocr_image.crop((left, top, right + 1, bottom + 1))
+                table_data = pytesseract.image_to_data(
+                    table_crop,
+                    lang="eng",
+                    config="--psm 11 -c preserve_interword_spaces=1",
+                    output_type=pytesseract.Output.DICT,
+                )
+                table_words = _ocr_words(table_data)
+                for word in table_words:
+                    word["x"] += left
+                    word["y"] += top
+                    word["center_y"] += top
+                grid_text = serialize_grid_rows(words_to_grid_rows(table_words, grid))
+            ocr_text = "\n".join(part for part in (logical_text, geometric_text, grid_text) if part)
             if len(ocr_text.strip()) > len(current.strip()):
                 pages[index] = ocr_text
         except Exception as exc:

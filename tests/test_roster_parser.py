@@ -173,6 +173,23 @@ OFFICIALS"""
     assert len(result.players) == 3
 
 
+def test_parser_profile_is_selected_by_evidence_not_list_order(monkeypatch):
+    page = """FIVB international event
+TESTLAND (TST)
+FINAL TEAM LIST AND DELEGATION
+Shirt\tName & First Name\tPosition\tBirth Date\tHeight
+1\tALPHA Anna\tSetter\t13/03/09\t180
+2\tBETA Bea\tMiddle blocker\t04/07/09\t188
+3\tGAMMA Gina\tLibero\t11/11/09\t170
+"""
+    monkeypatch.setattr(roster_parser, "extract_pages", lambda _: [page])
+
+    result = parse_bulletin(b"not-a-real-pdf")
+
+    assert result.profile == "CEV/WEVZA"
+    assert len(result.players) == 3
+
+
 def test_fivb_roster_without_team_header_is_kept_for_review():
     page = """FIVB Volleyball Nations League
 Team registration

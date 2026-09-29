@@ -13,6 +13,7 @@ from typing import Any
 from .date_parser import DateOrder, detect_date_order, parse_date
 from .pdf_reader import extract_pages
 from .position_parser import normalize_position
+from .structured_table import extract_structured_roster_rows
 
 TEAM_RE = re.compile(r"(?mi)^\s*([^\r\n()]{2,80}?)\s*\(\s*([A-Z0-9]{3})\s*\)\s*$")
 TEAM_CODE_RE = re.compile(r"\(\s*([A-Z0-9]{3})\s*\)", re.IGNORECASE)
@@ -110,6 +111,9 @@ class BaseRosterParser(ABC):
     @abstractmethod
     def parse(self, pages: list[str], forced_date_order: DateOrder | None = None) -> ParseResult: ...
 
+    def score(self, pages: list[str]) -> int:
+        return 1 if self.supports(pages) else -1
+
 
 class CEVRosterParser(BaseRosterParser):
     name = "CEV/WEVZA"
@@ -117,8 +121,20 @@ class CEVRosterParser(BaseRosterParser):
     def supports(self, pages: list[str]) -> bool:
         return any(self._is_roster_page(page) for page in pages)
 
+    def score(self, pages: list[str]) -> int:
+        text = "\n".join(pages).upper()
+        if not self.supports(pages):
+            return -1
+        score = 2
+        score += 5 if "FINAL TEAM LIST" in text else 0
+        score += 3 if "PERSONAL DATA" in text else 0
+        score += 2 if len(DATE_IN_LINE.findall(text)) >= 3 else 0
+        return score
+
     @staticmethod
     def _is_roster_page(page: str) -> bool:
+        if extract_structured_roster_rows(page):
+            return True
         upper = page.upper()
         if "FINAL TEAM LIST" in upper and ("BIRTH" in upper or "PERSONAL DATA" in upper):
             return True
@@ -341,6 +357,27 @@ class CEVRosterParser(BaseRosterParser):
             header_position = page.upper().find("FINAL TEAM LIST")
             roster = page[header_position:] if header_position >= 0 else page
             player_section = re.split(r"TEAM OFFICIAL", roster, maxsplit=1, flags=re.IGNORECASE)[0]
+            structured_rows = extract_structured_roster_rows(page)
+            if structured_rows:
+                for row in structured_rows:
+                    position_key = re.sub(r"[^A-Z0-9]", "", row.position.upper())
+                    position_code = FIVB_OCR_POSITION_MAPPING.get(position_key, position_key)
+                    position = FIVB_POSITION_MAPPING.get(position_code, row.position or "Controleren")
+                    candidates.append(
+                        {
+                            "country_code": country_code,
+                            "country_name": country_name,
+                            "jersey_number": row.jersey_number,
+                            "last_name": row.last_name,
+                            "first_name": row.first_name,
+                            "full_name_original": row.full_name,
+                            "position_original": position,
+                            "raw_birth_date": row.raw_birth_date,
+                            "height_cm": row.height_cm,
+                            "split_ok": bool(row.last_name and row.first_name),
+                        }
+                    )
+                continue
             expected_rows = len(DATE_IN_LINE.findall(player_section))
             matched_rows = 0
             matched_players: Counter[tuple[int | None, str]] = Counter()
@@ -424,12 +461,16 @@ class CEVRosterParser(BaseRosterParser):
                 row_warnings.append("Ongeldige of niet herkenbare geboortedatum.")
             elif birth > date.today():
                 row_warnings.append("Geboortedatum ligt in de toekomst.")
+            elif birth.year < 1950:
+                row_warnings.append("Geboortejaar is onwaarschijnlijk; controleer de datum.")
             if item["height_cm"] is None:
                 row_warnings.append("Lengte ontbreekt.")
             elif not 140 <= item["height_cm"] <= 215:
                 row_warnings.append("Lengte valt buiten de gebruikelijke controlegrenzen (140-215 cm).")
             if not item["split_ok"]:
                 row_warnings.append("Voor- en achternaam konden niet betrouwbaar worden gesplitst.")
+            if item["jersey_number"] is None:
+                row_warnings.append("Rugnummer ontbreekt.")
             duplicate_key = (item["country_code"], item["jersey_number"])
             if item["jersey_number"] is not None:
                 if duplicate_key in seen:
@@ -461,8 +502,20 @@ class FIVBRosterParser(BaseRosterParser):
     def supports(self, pages: list[str]) -> bool:
         return any(self._is_possible_roster_page(page) for page in pages)
 
+    def score(self, pages: list[str]) -> int:
+        text = "\n".join(pages).upper()
+        if not self.supports(pages):
+            return -1
+        score = 2
+        score += 6 if "NO FIVB" in text or "O-2BIS" in text else 0
+        score += 4 if "TEAM REGISTRATION" in text or "TEAM COMPOSITION" in text else 0
+        score += 3 if re.search(FIVB_DATE, text, re.IGNORECASE) else 0
+        return score
+
     @staticmethod
     def _is_roster_page(page: str) -> bool:
+        if extract_structured_roster_rows(page):
+            return True
         upper = page.upper()
         dates = len(re.findall(FIVB_DATE, page, re.IGNORECASE))
         marker_groups = [
@@ -506,7 +559,7 @@ class FIVBRosterParser(BaseRosterParser):
     def _synthetic_page(
         cls,
         team: tuple[str, str],
-        rows: list[tuple[int, str, str, str, str, int]],
+        rows: list[tuple[int | None, str, str, str, str, int | None]],
     ) -> str:
         country_name, country_code = team
         lines = [
@@ -519,9 +572,10 @@ class FIVBRosterParser(BaseRosterParser):
             if not numeric_date:
                 continue
             full_name = f"{last_name.upper()} {first_name}".strip()
+            position_label = FIVB_POSITION_MAPPING.get(position.upper(), "Controleren")
             lines.append(
-                f"{jersey} {full_name} {FIVB_POSITION_MAPPING[position.upper()]} "
-                f"{numeric_date} 0 {height}"
+                f"{jersey if jersey is not None else ''} {full_name} {position_label} "
+                f"{numeric_date} 0 {height or 0}"
             )
         lines.append("TEAM OFFICIALS:")
         return "\n".join(lines)
@@ -610,6 +664,28 @@ class FIVBRosterParser(BaseRosterParser):
             last_name, first_name = cls._split_text_name(prefix)
             rows.append((int(jersey), last_name, first_name, position.upper(), raw_date, int(height)))
         return rows
+
+    @classmethod
+    def _rows_from_page(
+        cls, page: str
+    ) -> list[tuple[int | None, str, str, str, str, int | None]]:
+        """Prefer header-addressed cells and use prose reconstruction as fallback."""
+        structured = extract_structured_roster_rows(page)
+        rows: list[tuple[int | None, str, str, str, str, int | None]] = []
+        for row in structured:
+            raw_position = re.sub(r"[^A-Z0-9]", "", row.position.upper())
+            position = FIVB_OCR_POSITION_MAPPING.get(raw_position, raw_position)
+            rows.append(
+                (
+                    row.jersey_number,
+                    row.last_name,
+                    row.first_name,
+                    position,
+                    row.raw_birth_date,
+                    row.height_cm,
+                )
+            )
+        return rows or cls._rows_from_text(page)
 
     @classmethod
     def _salvage_scan_line(
@@ -759,7 +835,10 @@ class FIVBRosterParser(BaseRosterParser):
                     f"De spelers zijn opgenomen onder tijdelijke code {country_code}; corrigeer teamnaam en code."
                 )
             player_section = re.split(r"\bOFFICIALS\b", page, maxsplit=1, flags=re.IGNORECASE)[0]
-            expected = len(re.findall(FIVB_DATE, player_section, re.IGNORECASE))
+            structured_rows = extract_structured_roster_rows(page)
+            expected = len(structured_rows) or len(
+                set(re.findall(FIVB_DATE, player_section, re.IGNORECASE))
+            )
             if expected > counts[country_code]:
                 result.warnings.append(
                     f"VOLLEDIGHEIDSCONTROLE: {country_code} bevat circa {expected} spelersregels, "
@@ -776,7 +855,7 @@ class FIVBRosterParser(BaseRosterParser):
             detected_team = self._team_from_page(page)
             team = detected_team or self._temporary_team(index)
             source_pages.append((index, page, team, detected_team is None))
-            synthetic_pages.append(self._synthetic_page(team, self._rows_from_text(page)))
+            synthetic_pages.append(self._synthetic_page(team, self._rows_from_page(page)))
         result = self._parse_synthetic(synthetic_pages, forced_date_order)
         result = self._add_salvaged_scan_rows(result, source_pages)
         return self._add_fivb_checks(result, source_pages)
@@ -798,7 +877,7 @@ class FIVBRosterParser(BaseRosterParser):
             team = detected_team or self._temporary_team(index + 1)
             teams_by_page[index] = team
             source_pages.append((index + 1, page, team, detected_team is None))
-            fallback_by_page[index] = self._synthetic_page(team, self._rows_from_text(page))
+            fallback_by_page[index] = self._synthetic_page(team, self._rows_from_page(page))
 
         structured_by_page: dict[int, str] = {}
         raw = source if isinstance(source, bytes) else Path(source).read_bytes()
@@ -816,7 +895,10 @@ class FIVBRosterParser(BaseRosterParser):
 
         merged = [structured_by_page.get(index, page) for index, page in fallback_by_page.items()]
         result = self._parse_synthetic(merged, forced_date_order)
-        result = self._add_salvaged_scan_rows(result, source_pages)
+        unstructured_pages = [
+            item for item in source_pages if not extract_structured_roster_rows(item[1])
+        ]
+        result = self._add_salvaged_scan_rows(result, unstructured_pages)
         return self._add_fivb_checks(result, source_pages)
 
 
@@ -842,7 +924,7 @@ class GenericRosterParser(BaseRosterParser):
 def parse_bulletin(source: bytes | str, forced_date_order: DateOrder | None = None) -> ParseResult:
     pages = extract_pages(source)
     parsers: list[BaseRosterParser] = [FIVBRosterParser(), CEVRosterParser(), GenericRosterParser()]
-    parser = next(candidate for candidate in parsers if candidate.supports(pages))
+    parser = max(parsers, key=lambda candidate: candidate.score(pages))
     if isinstance(parser, FIVBRosterParser):
         result = parser.parse_document(source, pages, forced_date_order)
     else:
