@@ -42,7 +42,7 @@ FIVB_PLAYER_RE = re.compile(
     re.IGNORECASE,
 )
 FIVB_REGISTRATION_PLAYER_RE = re.compile(
-    rf"^\s*\d{{4,8}}\s+.*?\s+(\d{{1,2}})\s+(?:[CL]\s+)?(.+?)\s+"
+    rf"^\s*\d{{4,8}}\s+(?:\S+\s+){{0,4}}?(\d{{1,2}})\s+(?:[CL]\s+)?(.+?)\s+"
     rf"(OH|OP|MB|S|L)\s+({FIVB_DATE})\s+(\d{{3}})\b",
     re.IGNORECASE,
 )
@@ -569,12 +569,17 @@ class FIVBRosterParser(BaseRosterParser):
     @classmethod
     def _rows_from_text(cls, page: str) -> list[tuple[int, str, str, str, str, int]]:
         rows: list[tuple[int, str, str, str, str, int]] = []
+        seen: set[tuple[int, str]] = set()
         for line in page.splitlines():
             clean = re.sub(r"\s+", " ", line).strip()
             match = FIVB_PLAYER_RE.match(clean) or FIVB_REGISTRATION_PLAYER_RE.match(clean)
             if not match:
                 continue
             jersey, prefix, position, raw_date, height = match.groups()
+            key = (int(jersey), raw_date.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
             last_name, first_name = cls._split_text_name(prefix)
             rows.append((int(jersey), last_name, first_name, position.upper(), raw_date, int(height)))
         return rows

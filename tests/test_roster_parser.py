@@ -81,6 +81,15 @@ def test_fivb_table_columns_are_detected_by_header_name():
     ]
 
 
+def test_fivb_geometric_and_logical_ocr_rows_are_deduplicated():
+    page = """174474 5 Yordanova Maria Yordanova OH 25-May-2002 184
+174474 5 Yordanova Maria Yordanova OH 25-May-2002 184"""
+
+    rows = FIVBRosterParser._rows_from_text(page)
+
+    assert rows == [(5, "Yordanova", "Maria", "OH", "25-May-2002", 184)]
+
+
 def test_fivb_roster_without_team_header_is_kept_for_review():
     page = """FIVB Volleyball Nations League
 Team registration

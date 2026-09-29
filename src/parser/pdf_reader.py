@@ -3,8 +3,11 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 import logging
+from statistics import median
+from typing import Any
 
 LOGGER = logging.getLogger(__name__)
+OCR_DPI = 240
 
 
 class NoUsableTextError(ValueError):
@@ -65,11 +68,19 @@ def _ocr_image_pages(raw: bytes, extracted_pages: list[str]) -> list[str]:
         if not _needs_ocr(current) or not page.get_images(full=True):
             continue
         try:
-            pixmap = page.get_pixmap(dpi=200, colorspace=fitz.csRGB, alpha=False)
+            pixmap = page.get_pixmap(dpi=OCR_DPI, colorspace=fitz.csRGB, alpha=False)
             image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
             image = _orient_image_for_ocr(image, page.rotation)
             image = ImageOps.autocontrast(ImageOps.grayscale(image))
-            ocr_text = pytesseract.image_to_string(image, lang="eng", config="--psm 6")
+            data = pytesseract.image_to_data(
+                image,
+                lang="eng",
+                config="--psm 6 -c preserve_interword_spaces=1",
+                output_type=pytesseract.Output.DICT,
+            )
+            logical_text = _logical_text_from_ocr_data(data)
+            geometric_text = _geometric_rows_from_ocr_data(data, image.height)
+            ocr_text = "\n".join(part for part in (logical_text, geometric_text) if part)
             if len(ocr_text.strip()) > len(current.strip()):
                 pages[index] = ocr_text
         except Exception as exc:
@@ -95,3 +106,79 @@ def _needs_ocr(text: str) -> bool:
     if "FINAL TEAM LIST" in upper and ("BIRTH" in upper or "POSITION" in upper):
         return False
     return len(clean) < 350
+
+
+def _ocr_words(data: dict[str, list[Any]]) -> list[dict[str, Any]]:
+    """Normalize Tesseract word boxes while retaining their table geometry."""
+    words: list[dict[str, Any]] = []
+    texts = data.get("text", [])
+    for index, raw_text in enumerate(texts):
+        text = str(raw_text or "").strip()
+        if not text:
+            continue
+        try:
+            confidence = float(data.get("conf", [])[index])
+            x = int(data.get("left", [])[index])
+            y = int(data.get("top", [])[index])
+            width = int(data.get("width", [])[index])
+            height = int(data.get("height", [])[index])
+            block = int(data.get("block_num", [])[index])
+            paragraph = int(data.get("par_num", [])[index])
+            line = int(data.get("line_num", [])[index])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if confidence < 0 or width <= 0 or height <= 0:
+            continue
+        words.append(
+            {
+                "text": text,
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "center_y": y + height / 2,
+                "line_key": (block, paragraph, line),
+            }
+        )
+    return words
+
+
+def _logical_text_from_ocr_data(data: dict[str, list[Any]]) -> str:
+    """Rebuild Tesseract's ordinary reading order from word-level output."""
+    lines: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
+    order: list[tuple[int, int, int]] = []
+    for word in _ocr_words(data):
+        key = word["line_key"]
+        if key not in lines:
+            lines[key] = []
+            order.append(key)
+        lines[key].append(word)
+    return "\n".join(
+        " ".join(word["text"] for word in sorted(lines[key], key=lambda item: item["x"]))
+        for key in order
+    )
+
+
+def _geometric_rows_from_ocr_data(data: dict[str, list[Any]], image_height: int) -> str:
+    """Reassemble dense scanned tables by visual row instead of OCR reading order."""
+    words = _ocr_words(data)
+    if not words:
+        return ""
+    typical_height = median(word["height"] for word in words)
+    tolerance = max(5.0, min(typical_height * 0.65, image_height * 0.008))
+    rows: list[dict[str, Any]] = []
+    for word in sorted(words, key=lambda item: (item["center_y"], item["x"])):
+        best = min(rows, key=lambda row: abs(row["center_y"] - word["center_y"]), default=None)
+        if best is None or abs(best["center_y"] - word["center_y"]) > tolerance:
+            rows.append({"center_y": word["center_y"], "words": [word]})
+            continue
+        best["words"].append(word)
+        best["center_y"] = sum(item["center_y"] for item in best["words"]) / len(best["words"])
+
+    reconstructed: list[str] = []
+    for row in sorted(rows, key=lambda item: item["center_y"]):
+        row_words = sorted(row["words"], key=lambda item: item["x"])
+        if len(row_words) < 2:
+            continue
+        reconstructed.append(" ".join(word["text"] for word in row_words))
+    return "\n".join(reconstructed)
