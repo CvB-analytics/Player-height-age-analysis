@@ -60,6 +60,11 @@ FIVB_OCR_POSITION_MAPPING = {
     "S": "S", "5": "S",
     "L": "L", "I": "L",
 }
+COMPLETENESS_WARNING_RE = re.compile(
+    r"^VOLLEDIGHEIDSCONTROLE:\s+([A-Z0-9]{3})\s+bevat circa\s+(\d+)\s+spelersregels,\s+"
+    r"maar er zijn\s+(\d+)\s+herkend\.",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -454,7 +459,7 @@ class FIVBRosterParser(BaseRosterParser):
     name = "FIVB"
 
     def supports(self, pages: list[str]) -> bool:
-        return any(self._is_roster_page(page) for page in pages)
+        return any(self._is_possible_roster_page(page) for page in pages)
 
     @staticmethod
     def _is_roster_page(page: str) -> bool:
@@ -468,6 +473,18 @@ class FIVBRosterParser(BaseRosterParser):
             "HEIGHT" in upper or "HIGHEST REACH" in upper,
         ]
         return dates >= 3 and sum(marker_groups) >= 2
+
+    @classmethod
+    def _is_possible_roster_page(cls, page: str) -> bool:
+        if cls._is_roster_page(page):
+            return True
+        upper = page.upper()
+        dates = len(re.findall(FIVB_DATE, page, re.IGNORECASE))
+        roster_marker = any(
+            marker in upper
+            for marker in ("TEAM REGISTRATION", "BIRTHDATE", "BIRTH DATE", "NO FIVB", "RESERVE PLAYERS")
+        )
+        return dates >= 1 and roster_marker and cls._team_from_page(page) is not None
 
     @staticmethod
     def _team_from_page(page: str) -> tuple[str, str] | None:
@@ -754,7 +771,7 @@ class FIVBRosterParser(BaseRosterParser):
         synthetic_pages = []
         source_pages: list[tuple[int, str, tuple[str, str], bool]] = []
         for index, page in enumerate(pages, start=1):
-            if not self._is_roster_page(page):
+            if not self._is_possible_roster_page(page):
                 continue
             detected_team = self._team_from_page(page)
             team = detected_team or self._temporary_team(index)
@@ -775,7 +792,7 @@ class FIVBRosterParser(BaseRosterParser):
         source_pages: list[tuple[int, str, tuple[str, str], bool]] = []
         teams_by_page: dict[int, tuple[str, str]] = {}
         for index, page in enumerate(pages):
-            if not self._is_roster_page(page):
+            if not self._is_possible_roster_page(page):
                 continue
             detected_team = self._team_from_page(page)
             team = detected_team or self._temporary_team(index + 1)
@@ -824,8 +841,67 @@ class GenericRosterParser(BaseRosterParser):
 
 def parse_bulletin(source: bytes | str, forced_date_order: DateOrder | None = None) -> ParseResult:
     pages = extract_pages(source)
-    parsers: list[BaseRosterParser] = [CEVRosterParser(), FIVBRosterParser(), GenericRosterParser()]
+    parsers: list[BaseRosterParser] = [FIVBRosterParser(), CEVRosterParser(), GenericRosterParser()]
     parser = next(candidate for candidate in parsers if candidate.supports(pages))
     if isinstance(parser, FIVBRosterParser):
-        return parser.parse_document(source, pages, forced_date_order)
-    return parser.parse(pages, forced_date_order)
+        result = parser.parse_document(source, pages, forced_date_order)
+    else:
+        result = parser.parse(pages, forced_date_order)
+    return _add_missing_concept_rows(result)
+
+
+def _add_missing_concept_rows(result: ParseResult) -> ParseResult:
+    """Never discard an estimated player row merely because its fields are unreadable."""
+    estimates: dict[str, int] = {}
+    retained_warnings: list[str] = []
+    for warning in result.warnings:
+        match = COMPLETENESS_WARNING_RE.match(warning)
+        if match:
+            country_code, expected, _ = match.groups()
+            estimates[country_code.upper()] = max(estimates.get(country_code.upper(), 0), int(expected))
+        else:
+            retained_warnings.append(warning)
+    if not estimates:
+        return result
+
+    country_names = {team["country_code"]: team["country_name"] for team in result.teams}
+    counts = Counter(player.country_code for player in result.players)
+    added: Counter[str] = Counter()
+    for country_code, expected in estimates.items():
+        missing = max(0, expected - counts[country_code])
+        for index in range(missing):
+            concept_number = counts[country_code] + index + 1
+            result.players.append(
+                ParsedPlayer(
+                    country_code=country_code,
+                    country_name=country_names.get(country_code, country_code),
+                    jersey_number=None,
+                    last_name="Controleren",
+                    first_name=f"Speler {concept_number}",
+                    full_name_original="",
+                    position_original="Controleren",
+                    position_normalized="ONB",
+                    raw_birth_date="",
+                    birth_date=None,
+                    height_cm=None,
+                    extraction_status="Controleren",
+                    extraction_warning=(
+                        "Mogelijke spelersregel automatisch toegevoegd. "
+                        "Vul rugnummer, naam, positie, geboortedatum en lengte aan."
+                    ),
+                )
+            )
+            added[country_code] += 1
+        retained_warnings.append(
+            f"VOLLEDIGHEIDSCONTROLE: {country_code} bevat circa {expected} spelersregels. "
+            f"{added[country_code]} onzekere conceptregel(s) zijn toegevoegd; controleer en vul ze aan."
+        )
+    if added:
+        retained_warnings = [
+            warning
+            for warning in retained_warnings
+            if not warning.startswith("Geen spelersregels gevonden.")
+        ]
+        result.date_order = "DMY"
+    result.warnings = retained_warnings
+    return result

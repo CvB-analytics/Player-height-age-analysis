@@ -11,7 +11,7 @@ from src.ui.reports import render_reports
 from src.ui.results import render_results
 from src.ui.tournament import render_new_tournament
 
-APP_VERSION = "0.6.1"
+APP_VERSION = "0.6.2"
 
 logging.basicConfig(
     level=logging.INFO,

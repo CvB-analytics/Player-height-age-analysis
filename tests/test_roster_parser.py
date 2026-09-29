@@ -1,4 +1,13 @@
-from src.parser.roster_parser import CEVRosterParser, FIVBRosterParser, parse_bulletin
+from collections import Counter
+
+import src.parser.roster_parser as roster_parser
+from src.parser.roster_parser import (
+    CEVRosterParser,
+    FIVBRosterParser,
+    ParseResult,
+    _add_missing_concept_rows,
+    parse_bulletin,
+)
 
 
 def test_cev_player_line_recognition():
@@ -119,6 +128,49 @@ No FIVB Shirt Last name First name Pos. Birthdate Height
 OFFICIALS"""
 
     assert FIVBRosterParser._is_roster_page(page) is True
+
+
+def test_detected_but_unreadable_rows_become_editable_concepts():
+    result = ParseResult(
+        profile="FIVB",
+        date_order="AMBIGUOUS",
+        players=[],
+        teams=[
+            {"country_code": "BUL", "country_name": "Bulgaria"},
+            {"country_code": "NED", "country_name": "Netherlands"},
+        ],
+        warnings=[
+            "Geen spelersregels gevonden. Controleer of dit een ondersteund CEV/WEVZA-bulletin is.",
+            "VOLLEDIGHEIDSCONTROLE: BUL bevat circa 10 spelersregels, maar er zijn 0 herkend. Controleer en vul ontbrekende spelers aan.",
+            "VOLLEDIGHEIDSCONTROLE: NED bevat circa 8 spelersregels, maar er zijn 0 herkend. Controleer en vul ontbrekende spelers aan.",
+        ],
+    )
+
+    repaired = _add_missing_concept_rows(result)
+
+    assert len(repaired.players) == 18
+    assert Counter(player.country_code for player in repaired.players) == {"BUL": 10, "NED": 8}
+    assert repaired.date_order == "DMY"
+    assert all(player.extraction_status == "Controleren" for player in repaired.players)
+    assert not any(warning.startswith("Geen spelersregels gevonden.") for warning in repaired.warnings)
+    assert any("10 onzekere conceptregel(s)" in warning for warning in repaired.warnings)
+
+
+def test_parse_bulletin_prefers_fivb_when_scan_contains_mixed_markers(monkeypatch):
+    page = """FINAL TEAM LIST
+O-2bis Team registration
+BUL - Bulgaria
+No FIVB Shirt Last name First name Pos. Birthdate Height
+174474 5 Yordanova Maria Yordanova OH 25-May-2002 184
+142347 6 Paskova Miroslava Paskova OH 16-Feb-1996 181
+142348 8 Barakova Petya Barakova S 18-Jun-1994 180
+OFFICIALS"""
+    monkeypatch.setattr(roster_parser, "extract_pages", lambda _: [page])
+
+    result = parse_bulletin(b"not-a-real-pdf")
+
+    assert result.profile == "FIVB"
+    assert len(result.players) == 3
 
 
 def test_fivb_roster_without_team_header_is_kept_for_review():
