@@ -4,13 +4,23 @@ POSITION_MAPPING = {
     "setter": "SV",
     "outside spiker": "PL",
     "outside hitter": "PL",
+    "outside": "PL",
+    "receiver attacker": "PL",
+    "wing spiker": "PL",
+    "oh": "PL",
+    "os": "PL",
     "middle blocker": "MB",
     "middle": "MB",
+    "mb": "MB",
     "opposite": "DIA",
     "opposite hitter": "DIA",
+    "op": "DIA",
+    "opp": "DIA",
     "libero": "LIB",
     "libero 1": "LIB",
     "libero 2": "LIB",
+    "l": "LIB",
+    "s": "SV",
 }
 
 

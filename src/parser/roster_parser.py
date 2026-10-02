@@ -30,7 +30,8 @@ FALLBACK_PLAYER_RE = re.compile(
 DATE_IN_LINE = re.compile(r"\b\d{1,4}[./-]\d{1,2}[./-]\d{1,4}\b")
 POSITION_ALIASES = (
     "libero 1", "libero 2", "outside spiker", "outside hitter", "middle blocker",
-    "opposite hitter", "setter", "middle", "opposite",
+    "opposite hitter", "receiver attacker", "wing spiker", "setter", "middle", "opposite",
+    "outside", "oh", "os", "op", "opp", "mb", "s", "l",
 )
 OCR_CODE_TRANSLATION = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
 OCR_JERSEY_TRANSLATION = str.maketrans({
@@ -59,7 +60,7 @@ FIVB_OCR_POSITION_MAPPING = {
     "OH": "OH", "0H": "OH", "OI": "OH",
     "OP": "OP", "0P": "OP",
     "MB": "MB", "M8": "MB",
-    "S": "S", "5": "S",
+    "S": "S", "5": "S", "SS": "S", "CS": "S", "SC": "S",
     "L": "L", "I": "L",
 }
 COMPLETENESS_WARNING_RE = re.compile(
@@ -206,7 +207,9 @@ class CEVRosterParser(BaseRosterParser):
     @staticmethod
     def _date_lines(text: str) -> list[str]:
         """Return physical OCR lines containing a player-like date before officials."""
-        player_section = re.split(r"TEAM OFFICIAL", text, maxsplit=1, flags=re.IGNORECASE)[0]
+        player_section = re.split(
+            r"RESERVE PLAYERS?|TEAM OFFICIAL", text, maxsplit=1, flags=re.IGNORECASE
+        )[0]
         return [
             re.sub(r"\s+", " ", line).strip()
             for line in player_section.splitlines()
@@ -277,11 +280,11 @@ class CEVRosterParser(BaseRosterParser):
         for line in lines:
             line = re.sub(r"^[|Il!]+\s*(?=\d{1,2}\s)", "", line)
             upper = line.upper()
-            if not line or upper.startswith("TEAM OFFICIAL"):
+            if not line or upper.startswith("TEAM OFFICIAL") or upper.startswith("RESERVE PLAYER"):
                 if current:
                     result.append(current)
                     current = ""
-                if upper.startswith("TEAM OFFICIAL"):
+                if upper.startswith("TEAM OFFICIAL") or upper.startswith("RESERVE PLAYER"):
                     break
                 continue
             if re.match(r"^\d{1,2}\s+", line):
@@ -310,7 +313,11 @@ class CEVRosterParser(BaseRosterParser):
                     current = ""
                     pending_prefix = line
                     late_name_continuation = False
-                elif late_name_continuation and DATE_IN_LINE.search(current) and len(line.split()) <= 3:
+                elif (
+                    DATE_IN_LINE.search(current)
+                    and len(line.split()) <= 3
+                    and CEVRosterParser._needs_name_continuation(current)
+                ):
                     current = re.sub(rf"\s+({POSITION})\s+", rf" {line} \1 ", current, count=1, flags=re.IGNORECASE)
                     late_name_continuation = False
                 else:
@@ -325,6 +332,18 @@ class CEVRosterParser(BaseRosterParser):
         if current:
             result.append(current)
         return result
+
+    @staticmethod
+    def _needs_name_continuation(current: str) -> bool:
+        match = re.match(
+            rf"^\s*\d{{1,2}}\s+(.+?)\s+(?:{POSITION})\s+\d{{1,4}}[./-]",
+            current,
+            re.IGNORECASE,
+        )
+        if not match:
+            return False
+        _, _, split_ok = CEVRosterParser._split_name(match.group(1))
+        return not split_ok
 
     @staticmethod
     def _split_name(full_name: str) -> tuple[str, str, bool]:
@@ -357,7 +376,9 @@ class CEVRosterParser(BaseRosterParser):
 
             header_position = page.upper().find("FINAL TEAM LIST")
             roster = page[header_position:] if header_position >= 0 else page
-            player_section = re.split(r"TEAM OFFICIAL", roster, maxsplit=1, flags=re.IGNORECASE)[0]
+            player_section = re.split(
+                r"RESERVE PLAYERS?|TEAM OFFICIAL", roster, maxsplit=1, flags=re.IGNORECASE
+            )[0]
             structured_rows = extract_structured_roster_rows(page)
             if structured_rows:
                 for row in structured_rows:
@@ -652,7 +673,8 @@ class FIVBRosterParser(BaseRosterParser):
     def _rows_from_text(cls, page: str) -> list[tuple[int, str, str, str, str, int]]:
         rows: list[tuple[int, str, str, str, str, int]] = []
         seen: set[tuple[int, str]] = set()
-        for line in page.splitlines():
+        main_roster = re.split(r"\bRESERVE PLAYERS?\b", page, maxsplit=1, flags=re.IGNORECASE)[0]
+        for line in main_roster.splitlines():
             clean = re.sub(r"\s+", " ", line).strip()
             match = FIVB_PLAYER_RE.match(clean) or FIVB_REGISTRATION_PLAYER_RE.match(clean)
             if not match:
@@ -753,7 +775,9 @@ class FIVBRosterParser(BaseRosterParser):
         seen_lines: set[tuple[str, int | None, str, str]] = set()
         for _, page, (country_name, country_code), _ in source_pages:
             teams.add((country_code, country_name))
-            player_section = re.split(r"\bOFFICIALS\b", page, maxsplit=1, flags=re.IGNORECASE)[0]
+            player_section = re.split(
+                r"\bRESERVE PLAYERS?\b|\bOFFICIALS\b", page, maxsplit=1, flags=re.IGNORECASE
+            )[0]
             for line in player_section.splitlines():
                 salvaged = cls._salvage_scan_line(line)
                 if not salvaged:
@@ -835,7 +859,9 @@ class FIVBRosterParser(BaseRosterParser):
                     f"VOLLEDIGHEIDSCONTROLE: De teamkop op pagina {page_number} was niet herkenbaar. "
                     f"De spelers zijn opgenomen onder tijdelijke code {country_code}; corrigeer teamnaam en code."
                 )
-            player_section = re.split(r"\bOFFICIALS\b", page, maxsplit=1, flags=re.IGNORECASE)[0]
+            player_section = re.split(
+                r"\bRESERVE PLAYERS?\b|\bOFFICIALS\b", page, maxsplit=1, flags=re.IGNORECASE
+            )[0]
             structured_rows = extract_structured_roster_rows(page)
             expected = len(structured_rows) or len(
                 set(re.findall(FIVB_DATE, player_section, re.IGNORECASE))
@@ -971,13 +997,20 @@ def _repair_shifted_player_rows(result: ParseResult) -> ParseResult:
             r"^[^A-Za-z0-9]*(\d{1,2})(?:\s+|[_|.:-]+|$)(.*)$",
             raw_last_name,
         )
+        trailing_role = None
         if not match:
+            trailing_role = re.match(
+                r"^.*?\b(\d{1,2})\s*[CL]{1,2}\s*$",
+                raw_last_name,
+                re.IGNORECASE,
+            )
+        if not match and not trailing_role:
             continue
-        jersey = int(match.group(1))
+        jersey = int((match or trailing_role).group(1))
         if not 0 < jersey <= 99:
             continue
 
-        shifted_last = _clean_shifted_name(match.group(2))
+        shifted_last = _clean_shifted_name(match.group(2)) if match else ""
         shifted_last = re.sub(r"^[CL](?:\s+|[_|.:-]+)", "", shifted_last, flags=re.IGNORECASE)
         current_first = _clean_shifted_name(player.first_name)
 

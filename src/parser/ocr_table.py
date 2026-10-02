@@ -101,7 +101,9 @@ def remove_grid_lines(image: Image.Image, grid: GridTable, margin: int = 2) -> I
     return Image.fromarray(result, mode="L")
 
 
-def words_to_grid_rows(words: list[dict[str, Any]], grid: GridTable) -> list[list[str]]:
+def words_to_grid_rows(
+    words: list[dict[str, Any]], grid: GridTable, keep_empty: bool = False
+) -> list[list[str]]:
     """Assign OCR words to cells using their visual center points."""
     rows: list[list[list[tuple[int, str]]]] = [
         [[] for _ in range(len(grid.x_lines) - 1)]
@@ -118,7 +120,7 @@ def words_to_grid_rows(words: list[dict[str, Any]], grid: GridTable) -> list[lis
     result: list[list[str]] = []
     for row in rows:
         values = [" ".join(text for _, text in sorted(cell)) for cell in row]
-        if any(values):
+        if keep_empty or any(values):
             result.append(values)
     return result
 

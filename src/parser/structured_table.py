@@ -44,11 +44,25 @@ def extract_structured_roster_rows(page: str) -> list[StructuredRosterRow]:
         mapping, header_end = _find_header(table)
         if not mapping:
             continue
-        parsed = [_parse_row(row, mapping) for row in table[header_end:]]
+        main_rows: list[list[str]] = []
+        for row in table[header_end:]:
+            marker = " ".join(row).casefold()
+            if "reserve player" in marker or (main_rows and _looks_like_repeated_header(row)):
+                break
+            main_rows.append(row)
+        parsed = [_parse_row(row, mapping) for row in main_rows]
         rows = [row for row in parsed if row is not None]
         if len(rows) > len(best):
             best = rows
     return best
+
+
+def _looks_like_repeated_header(row: list[str]) -> bool:
+    normalized = [_header_text(cell) for cell in row]
+    has_birth = any("birth" in cell or cell == "dob" for cell in normalized)
+    has_number = any(cell in {"shirt", "shirt no", "number", "no"} for cell in normalized)
+    has_name = any("name" in cell for cell in normalized)
+    return has_birth and has_number and has_name
 
 
 def _tabular_blocks(page: str) -> list[list[list[str]]]:

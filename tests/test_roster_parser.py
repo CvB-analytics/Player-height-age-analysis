@@ -78,6 +78,22 @@ OFFICIALS"""
     assert [player.height_cm for player in result.players] == [184, 172, 188, 180, 186]
 
 
+def test_fivb_reserve_players_are_excluded():
+    page = """Volleyball Nations League
+O-2bis Team registration
+TST - Testland
+No FIVB Shirt Last name First name Pos. Birthdate Height
+168983 1 Alpha Anna S 17-Dec-1997 184
+162899 3 Beta Bea L 30-Mar-1995 172
+RESERVE PLAYERS
+179014 7 Gamma Gina OP 13-Jan-2002 188
+OFFICIALS"""
+
+    result = FIVBRosterParser().parse([page])
+
+    assert [player.jersey_number for player in result.players] == [1, 3]
+
+
 def test_fivb_table_columns_are_detected_by_header_name():
     table = [
         ["No FIVB", "Elig.", "FoO", "Shirt", "Role", "Last name", "First name", "Shirt name", "Pos.", "Birthdate", "Height\n[cm]"],
@@ -216,6 +232,46 @@ def test_shifted_rows_are_repaired_even_without_a_clean_duplicate():
     assert (combined.last_name, combined.first_name) == ("Sampleva", "Eva")
     assert (moved_name.last_name, moved_name.first_name) == ("Reserveva", "Rita")
     assert (compound_first.last_name, compound_first.first_name) == ("Double Name", "First Second")
+
+
+def test_shirt_number_glued_to_role_marker_is_recovered():
+    shifted = _player(0, "MW 6C", "Sampleva Sara", date(1998, 2, 16), 181, "Controleren")
+    result = ParseResult("FIVB", "DMY", [shifted], [], [])
+
+    reconciled = _reconcile_duplicate_players(result)
+
+    assert reconciled.players[0].jersey_number == 6
+    assert reconciled.players[0].last_name == "Sampleva"
+    assert reconciled.players[0].first_name == "Sara"
+
+
+def test_wrapped_first_name_is_inserted_before_position():
+    page = """FRANCE (FRA)
+FINAL TEAM LIST AND DELEGATION
+Name & First Name Position Birth Date Weight Height
+9 MELINARD-CHANTEUR Outside spiker 14/11/07 61 183 Club (FRA)
+Maelyss
+TEAM OFFICIALS:"""
+
+    result = CEVRosterParser().parse([page])
+
+    assert len(result.players) == 1
+    assert result.players[0].last_name == "MELINARD-CHANTEUR"
+    assert result.players[0].first_name == "Maelyss"
+
+
+def test_short_and_damaged_outside_position_labels_are_normalized():
+    page = """TESTLAND (TST)
+FINAL TEAM LIST AND DELEGATION
+Name & First Name Position Birth Date Weight Height
+1 ALPHA Anna OH 13/03/09 65 180
+2 BETA Bea Outslde splker 14/03/09 66 181
+3 GAMMA Gina S 15/03/09 67 182
+TEAM OFFICIALS:"""
+
+    result = CEVRosterParser().parse([page])
+
+    assert [player.position_normalized for player in result.players] == ["PL", "PL", "SV"]
 
 
 def test_parse_bulletin_prefers_fivb_when_scan_contains_mixed_markers(monkeypatch):

@@ -37,3 +37,34 @@ def test_fivb_parser_prefers_structured_cells_over_garbled_prose():
     assert [player.full_name_original for player in result.players] == ["ALPHA Anna", "BETA Bea"]
     assert result.players[0].birth_date.isoformat() == "1994-06-18"
     assert [player.height_cm for player in result.players] == [180, 186]
+
+
+def test_reserve_section_is_not_returned_as_part_of_roster():
+    page = "\n".join(
+        [
+            "Shirt\tLast name\tFirst name\tPos.\tBirthdate\tHeight",
+            "1\tALPHA\tAnna\tS\t01-May-2001\t180",
+            "\tRESERVE PLAYERS\t\t\t\t",
+            "2\tBETA\tBea\tOH\t02-May-2001\t181",
+        ]
+    )
+
+    rows = extract_structured_roster_rows(page)
+
+    assert [row.jersey_number for row in rows] == [1]
+
+
+def test_repeated_header_also_marks_start_of_reserve_section():
+    header = "Shirt\tLast name\tFirst name\tPos.\tBirthdate\tHeight"
+    page = "\n".join(
+        [
+            header,
+            "1\tALPHA\tAnna\tS\t01-May-2001\t180",
+            header,
+            "2\tBETA\tBea\tOH\t02-May-2001\t181",
+        ]
+    )
+
+    rows = extract_structured_roster_rows(page)
+
+    assert [row.jersey_number for row in rows] == [1]

@@ -3,8 +3,10 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 import logging
+import re
 from statistics import median
 from typing import Any
+import unicodedata
 
 from .ocr_table import (
     deskew_table_image,
@@ -110,9 +112,11 @@ def _ocr_image_pages(raw: bytes, extracted_pages: list[str]) -> list[str]:
                     word["x"] += left
                     word["y"] += top
                     word["center_y"] += top
-                grid_text = serialize_grid_rows(words_to_grid_rows(table_words, grid))
+                grid_rows = words_to_grid_rows(table_words, grid, keep_empty=True)
+                _recover_sparse_position_cells(ocr_image, grid, grid_rows, pytesseract)
+                grid_text = serialize_grid_rows([row for row in grid_rows if any(row)])
             ocr_text = "\n".join(part for part in (logical_text, geometric_text, grid_text) if part)
-            if len(ocr_text.strip()) > len(current.strip()):
+            if _should_replace_extracted_text(current, ocr_text):
                 pages[index] = ocr_text
         except Exception as exc:
             LOGGER.info("OCR van PDF-pagina %s overgeslagen: %s", index + 1, type(exc).__name__)
@@ -120,23 +124,109 @@ def _ocr_image_pages(raw: bytes, extracted_pages: list[str]) -> list[str]:
 
 
 def _orient_image_for_ocr(image, rotation: int):
-    """Undo scan rotation metadata when the rendered content is still sideways."""
+    """Apply rotation metadata only when the visible content is still sideways."""
     normalized = int(rotation or 0) % 360
+    candidate = image
     if normalized == 90:
-        return image.rotate(90, expand=True)
-    if normalized == 180:
-        return image.rotate(180, expand=True)
-    if normalized == 270:
-        return image.rotate(-90, expand=True)
-    return image
+        candidate = image.rotate(90, expand=True)
+    elif normalized == 180:
+        candidate = image.rotate(180, expand=True)
+    elif normalized == 270:
+        candidate = image.rotate(-90, expand=True)
+    if candidate is image:
+        return image
+    return candidate if _horizontal_structure_score(candidate) > _horizontal_structure_score(image) * 1.15 else image
+
+
+def _horizontal_structure_score(image) -> float:
+    """Measure whether text and ruling lines predominantly run horizontally."""
+    import numpy as np
+    from PIL import ImageOps
+
+    sample = ImageOps.autocontrast(ImageOps.grayscale(image.copy()))
+    sample.thumbnail((800, 800))
+    dark = np.asarray(sample) < 170
+    if not dark.any():
+        return 0.0
+    horizontal = dark.mean(axis=1)
+    vertical = dark.mean(axis=0)
+    horizontal_count = max(5, int(len(horizontal) * 0.03))
+    vertical_count = max(5, int(len(vertical) * 0.03))
+    horizontal_strength = float(np.square(np.sort(horizontal)[-horizontal_count:]).mean())
+    vertical_strength = float(np.square(np.sort(vertical)[-vertical_count:]).mean())
+    return horizontal_strength / max(vertical_strength, 1e-9)
 
 
 def _needs_ocr(text: str) -> bool:
-    clean = " ".join(str(text or "").split())
+    raw = str(text or "")
+    if _is_corrupted_text(raw):
+        return True
+    clean = " ".join(raw.split())
     upper = clean.upper()
     if "FINAL TEAM LIST" in upper and ("BIRTH" in upper or "POSITION" in upper):
         return False
     return len(clean) < 350
+
+
+def _is_corrupted_text(text: str) -> bool:
+    raw = str(text or "")
+    control_characters = sum(
+        1
+        for character in raw
+        if unicodedata.category(character).startswith("C") and not character.isspace()
+    )
+    return control_characters / max(1, len(raw)) > 0.02
+
+
+def _should_replace_extracted_text(current: str, ocr_text: str) -> bool:
+    readable_ocr = str(ocr_text or "").strip()
+    if len(readable_ocr) <= 80:
+        return False
+    return _is_corrupted_text(current) or len(readable_ocr) > len(str(current or "").strip())
+
+
+def _recover_sparse_position_cells(image, grid, rows: list[list[str]], pytesseract_module) -> None:
+    """Retry tiny empty position cells, where one-letter codes are often skipped."""
+    from PIL import ImageOps
+
+    header_row: int | None = None
+    position_column: int | None = None
+    birth_column: int | None = None
+    for row_index, row in enumerate(rows[:5]):
+        for column, value in enumerate(row):
+            normalized = re.sub(r"[^a-z]", "", str(value).casefold())
+            if normalized in {"pos", "position"}:
+                header_row, position_column = row_index, column
+            if normalized in {"birthdate", "dateofbirth", "dob"}:
+                birth_column = column
+        if header_row is not None and birth_column is not None:
+            break
+    if header_row is None or position_column is None or birth_column is None:
+        return
+
+    accepted = {
+        "S", "OH", "OP", "MB", "L", "5", "0H", "0P", "M8", "I",
+        "SS", "CS", "SC",
+    }
+    for row_index in range(header_row + 1, min(len(rows), len(grid.y_lines) - 1)):
+        row = rows[row_index]
+        if birth_column >= len(row) or not re.search(r"\d{1,4}[-/.]\w{1,9}[-/.]\d{2,4}", row[birth_column]):
+            continue
+        current = re.sub(r"[^A-Z0-9]", "", row[position_column].upper())
+        if current in accepted:
+            continue
+        left, right = grid.x_lines[position_column], grid.x_lines[position_column + 1]
+        top, bottom = grid.y_lines[row_index], grid.y_lines[row_index + 1]
+        cell = image.crop((left + 2, top + 2, right - 1, bottom - 1))
+        cell = ImageOps.autocontrast(cell).resize((max(1, cell.width * 3), max(1, cell.height * 3)))
+        candidate = pytesseract_module.image_to_string(
+            cell,
+            lang="eng",
+            config="--psm 10 -c tessedit_char_whitelist=CSOHPMBL0158",
+        )
+        candidate = re.sub(r"[^A-Z0-9]", "", candidate.upper())
+        if candidate in accepted:
+            row[position_column] = candidate
 
 
 def _ocr_words(data: dict[str, list[Any]]) -> list[dict[str, Any]]:
